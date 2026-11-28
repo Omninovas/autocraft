@@ -1,6 +1,6 @@
 // The signed-in user's Task Runners (session routes): their list, approving or denying a runner's device login
-// (src/remote/device-login.ts), setting a runner's scopes, and removing one. Maintainers and operators approve and deny;
-// anyone lists, sets the scopes of and removes their own. Sending commands is granted on the rule of command connector tokens
+// (src/remote/device-login.ts), setting a runner's scopes, renaming and removing one. Maintainers and operators approve and deny;
+// anyone lists, sets the scopes of, renames and removes their own, and operators rename anyone's. Sending commands is granted on the rule of command connector tokens
 // (mcp.ts): by an operator or a maintainer.
 // Removing deletes the credential: a lease it holds goes back to the queue at its next heartbeat (liveLease).
 import { audit } from "../audit.ts";
@@ -9,7 +9,7 @@ import { HttpError, RateLimiter, share } from "../server/util.ts";
 import type { Req } from "../types.ts";
 import { approveLogin, denyLogin, normalizeCode, pendingLogin } from "../../remote/device-login.ts";
 import { loadHelpers } from "../../data/runners/index.ts";
-import { loadRunnerTokenOf } from "../../data/access/index.ts";
+import { loadRunnerTokenOf, renameRunner } from "../../data/access/index.ts";
 import type { HelperInfo, PendingRunnerLogin, RunnersReply } from "../../remote/protocol.ts";
 import type { Db } from "../../db/index.ts";
 
@@ -90,6 +90,22 @@ export async function scopes(db: Db, req: Req): Promise<RunnersReply> {
   const s = await scopesOf(db, req, b, had.canAnswer);
   if (!await setRunnerScopes(db, req.user.login, b.id as number, s)) throw new HttpError(404, "you have no such Task Runner");
   await audit(db, req.user.login, "runner-scopes", req.user.login, { id: b.id, ...s });
+  return await list(db, req);
+}
+
+/** The longest Task Runner label a rename sets. */
+export const RUNNER_LABEL_MAX = 64;
+
+/** Renames a Task Runner: its owner renames their own, an operator anyone's. Control characters become spaces; the label is trimmed. */
+export async function rename(db: Db, req: Req): Promise<RunnersReply> {
+  const b = body(req);
+  if (!Number.isInteger(b.id)) throw new HttpError(400, "id must be a Task Runner id");
+  if (typeof b.label !== "string") throw new HttpError(400, "label must be a string");
+  const label = b.label.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
+  if (!label.length || label.length > RUNNER_LABEL_MAX) throw new HttpError(400, `a Task Runner's name is 1 to ${RUNNER_LABEL_MAX} characters`);
+  const out = await renameRunner(db, b.id as number, label, req.user.role === "operator" ? null : req.user.login);
+  if (!out) throw new HttpError(404, "you have no such Task Runner");
+  await audit(db, req.user.login, "runner-rename", out.login, { id: b.id, from: out.was ?? undefined, to: label });
   return await list(db, req);
 }
 

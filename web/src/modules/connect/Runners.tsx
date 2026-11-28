@@ -1,7 +1,9 @@
-import { CaretDownIcon, TerminalWindowIcon } from "@phosphor-icons/react";
+import { CaretDownIcon, PencilSimpleIcon, TerminalWindowIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { t } from "../../../../src/i18n/index.ts";
 import { useApi, useQuery } from "../../api/client";
+import { useUser } from "../../shell/UserContext";
 import type { HelperReadiness, LoginScopes, RunnerInfo, UsageWindow } from "../../api/types";
 import { Badge, type Tone } from "../../ui/atoms/Badge";
 import { Button } from "../../ui/atoms/Button";
@@ -78,10 +80,6 @@ export function Runners() {
           <Link to="/connect/setup" className="text-accent-ink hover:underline">Open the Setup guide</Link>
         </p>
       )}
-      <p className={cn("flex flex-wrap gap-x-4 gap-y-1 px-3 py-2 text-xs", any && "border-t border-line")}>
-        <Link to="/model-queue" className="text-accent-ink hover:underline">Model call queue</Link>
-        <Link to="/agents" className="text-accent-ink hover:underline">Model calls that ran</Link>
-      </p>
     </Block>
   );
 }
@@ -97,10 +95,56 @@ const dotted = (parts: ReactNode[]) =>
       </span>
     ));
 
+/** The Agents page narrowed to one of the user's runners; a runner without a label narrows to the user. */
+const agentsOf = (login: string, r: RunnerInfo) => `/agents?${new URLSearchParams({ person: login, ...(r.label && { runner: r.label }) })}`;
+
+/** Inline rename: the name in an input with Save and Cancel; 1 to 64 characters. */
+function RenameForm({ r, name, onDone }: { r: RunnerInfo; name: string; onDone: (renamed?: string) => void }) {
+  const api = useApi();
+  const write = useWrite();
+  const [text, setText] = useState(name);
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    ref.current?.focus();
+    ref.current?.select();
+  }, []);
+  const value = text.trim();
+  const save = () =>
+    void write.run("rename", async () => {
+      await api.runners.rename(r.tokenId, value);
+      onDone(value);
+    });
+  return (
+    <form
+      className="flex flex-wrap items-center gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (value && value !== name) save();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onDone();
+      }}
+    >
+      <Input ref={ref} value={text} onChange={(e) => setText(e.target.value)} maxLength={64} aria-label={t("Name of {name}", { name })} className="w-full sm:max-w-xs" />
+      <Button type="submit" variant="primary" disabled={!value || value === name} loading={write.busy === "rename"}>
+        {t("Save")}
+      </Button>
+      <Button type="button" variant="ghost" onClick={() => onDone()}>
+        {t("Cancel")}
+      </Button>
+      <ErrorLine error={write.error} className="w-full" />
+    </form>
+  );
+}
+
 function RunnerRow({ r, answering }: { r: RunnerInfo; answering: boolean }) {
   const api = useApi();
   const write = useWrite();
+  const { login } = useUser();
   const [open, setOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renamed, setRenamed] = useState<string | null>(null);
+  const renameButton = useRef<HTMLButtonElement>(null);
   const b = readinessBadge(r);
   const isNew = nowMs() - Date.parse(r.createdAt) < NEW_MS;
   const name = r.label ?? `Runner ${r.tokenId}`;
@@ -151,6 +195,7 @@ function RunnerRow({ r, answering }: { r: RunnerInfo; answering: boolean }) {
             {r.readiness ? "Stopped." : "Logged in, not started yet."} Start it on {r.machine?.hostname ?? "its machine"}: <span className="code">autocraft work</span>
           </>
         )}
+        {renamed && <span className="sr-only">{t("Renamed to {name}", { name: renamed })}</span>}
       </p>
       {open && (
         <div className="space-y-3 border-t border-line px-3 py-3">
@@ -167,17 +212,35 @@ function RunnerRow({ r, answering }: { r: RunnerInfo; answering: boolean }) {
               </span>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <div className="min-w-0 flex-1 text-xs text-ink/55">
-              {dotted([
-                r.harness && `${r.harness}${r.models.top ? ` · ${r.models.top}` : ""}`,
-                r.machine && r.machine.arch,
-                `added ${day(r.createdAt)}`,
-                `expires ${day(r.expiresAt)}`,
-              ])}
-            </div>
-            <ConfirmButton label="Revoke" confirmLabel="Revoke now" idle="secondary" loading={write.busy === "revoke"} onConfirm={() => void write.run("revoke", () => api.runners.revoke(r.tokenId))} />
+          <div className="text-xs text-ink/55">
+            {dotted([
+              r.harness && `${r.harness}${r.models.top ? ` · ${r.models.top}` : ""}`,
+              r.machine && r.machine.arch,
+              `added ${day(r.createdAt)}`,
+              `expires ${day(r.expiresAt)}`,
+            ])}
           </div>
+          {renaming ? (
+            <RenameForm
+              r={r}
+              name={name}
+              onDone={(to) => {
+                setRenaming(false);
+                if (to) setRenamed(to);
+                requestAnimationFrame(() => renameButton.current?.focus());
+              }}
+            />
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <Link to={agentsOf(login, r)} className="mr-auto inline-flex h-8 items-center text-sm text-accent-ink hover:underline max-md:h-11">
+                {t("Agents")}
+              </Link>
+              <Button ref={renameButton} icon={PencilSimpleIcon} onClick={() => setRenaming(true)}>
+                {t("Rename")}
+              </Button>
+              <ConfirmButton label="Revoke" confirmLabel="Revoke now" idle="secondary" loading={write.busy === "revoke"} onConfirm={() => void write.run("revoke", () => api.runners.revoke(r.tokenId))} />
+            </div>
+          )}
           <ErrorLine error={write.error} />
         </div>
       )}

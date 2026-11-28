@@ -1,5 +1,5 @@
 import type { Api } from "../client";
-import type { InferenceSettings, JevStatus, McpToken, ModelQueue, ModelQueueCall, MySettings, PendingRunnerLogin, RunnerInfo, User } from "../types";
+import type { InferenceSettings, JevStatus, McpToken, ModelQueue, ModelQueueCall, ModelQueueFilter, MySettings, PendingRunnerLogin, RunnerInfo, User } from "../types";
 import { NOW } from "./fixtures";
 
 const DAY = 86_400_000;
@@ -29,7 +29,7 @@ export function createMcpMock(me: User, changed: () => void): Pick<Api, "mcp" | 
   const wait = <T>(v: T) => new Promise<T>((r) => setTimeout(() => r(v), 60));
 
   let runners: RunnerInfo[] = [
-    { tokenId: 2, label: "laptop", slots: 5, busy: 2, lastError: null, readiness: "ready", until: null, reason: null, fresh: true, lastSeen: at(-40_000), harness: "claude", models: { top: "opus", mid: "sonnet", small: "haiku" }, reserve: { fiveHour: 20, weekly: 10 },
+    { tokenId: 2, label: "desk-1", slots: 5, busy: 2, lastError: null, readiness: "ready", until: null, reason: null, fresh: true, lastSeen: at(-40_000), harness: "claude", models: { top: "opus", mid: "sonnet", small: "haiku" }, reserve: { fiveHour: 20, weekly: 10 },
       usage: { fiveHour: { usedPercent: 42, resetsAt: at(3 * 3600_000) }, weekly: { usedPercent: 18, resetsAt: at(4 * DAY) }, at: at(-40_000) },
       machine: { hostname: "kestrel", platform: "linux", arch: "x64" }, helperVersion: "1.3.0", createdAt: at(-30 * DAY), expiresAt: at(90 * DAY), agent: true, answer: false },
     { tokenId: 7, label: "studio", slots: 2, busy: 0, lastError: null, readiness: "login-refresh", until: at(3 * MIN), reason: "no call fits before the Claude login is refreshed: the Task Runner has claude refresh it 4 minutes before it ends", fresh: true, lastSeen: at(-25_000), harness: "claude", models: { top: "opus", mid: "sonnet", small: "haiku" }, reserve: { fiveHour: 20, weekly: 10 },
@@ -73,19 +73,20 @@ export function createMcpMock(me: User, changed: () => void): Pick<Api, "mcp" | 
   const item = (repo: string, number: number, kind: "pr" | "issue", title: string) => ({ repo, number, kind, state: "open" as const, title });
   type Row = Omit<ModelQueueCall, "pickable" | "picked"> & { pickedBy: string | null; repo: string; forLogin?: string };
   const queue: Row[] = [
-    { id: 5101, repo: "photocraft", items: [item("photocraft", 10012, "pr", "Fix crash when the curves panel is closed while a preview renders")], kind: "Review pull requests", tier: "top", model: "opus", estCostUsd: 0.84, waitedMs: 11 * MIN, why: { code: "picked", text: `Picked by ${me.login}` }, pickedBy: me.login, gating: false, followUp: false },
-    { id: 5102, repo: "designcraft", items: [item("designcraft", 1520, "pr", "Snap guides to the artboard edge on resize")], kind: "Review pull requests", tier: "top", model: "opus", estCostUsd: 0.79, waitedMs: 8 * MIN, why: { code: "picked", text: "Picked by oakmoss" }, pickedBy: "oakmoss", gating: false, followUp: false },
-    { id: 5108, repo: "designcraft", forLogin: "kiri-n", items: [item("designcraft", 1484, "pr", "Add Hungarian spellchecking and nonstandard hyphenation")], kind: "Answer conversations", tier: "top", model: "opus", estCostUsd: 0.38, waitedMs: 2 * MIN, why: staff ? { code: "bound", text: "Waiting for kiri-n's Task Runner: it is busy" } : { code: "bound", text: "Waiting for the asker's own Task Runner: it is busy" }, pickedBy: null, gating: false, followUp: false },
-    { id: 5103, repo: "pdfcraft", items: [item("pdfcraft", 2210, "pr", "Keep form field order when flattening annotations")], kind: "Push fix-ups", tier: "mid", model: "sonnet", estCostUsd: 0.31, waitedMs: 6 * MIN, why: { code: "session", text: "Waiting for laptop, which holds its session" }, pickedBy: null, gating: false, followUp: true },
-    { id: 5104, repo: "vectorcraft", items: [item("vectorcraft", 873, "issue", "Boolean union drops the last subpath of compound shapes"), item("vectorcraft", 880, "issue", "Union of overlapping circles leaves a sliver")], kind: "Implement issues", tier: "top", model: "opus", estCostUsd: 0.42, waitedMs: 19 * MIN, why: { code: "manual-only", text: "Every ready Task Runner is Manual only" }, pickedBy: null, gating: false, followUp: false, lastError: "the harness exited with code 1: rate limited" },
-    { id: 5105, repo: "filmcraft", items: [item("filmcraft", 3301, "pr", "Trim clips on the timeline with the keyboard")], kind: "Classify new and changed items", tier: "small", model: "haiku", estCostUsd: 0.004, waitedMs: 3 * MIN, why: { code: "busy", text: "Every Task Runner that may take it is busy" }, pickedBy: null, gating: true, followUp: false },
-    { id: 5106, repo: "deckcraft", items: [item("deckcraft", 455, "pr", "Export speaker notes to the PPTX notes pane")], kind: "Review pull requests", tier: "top", model: "opus", estCostUsd: null, waitedMs: 2 * MIN, why: { code: "behind", text: "4 calls ahead" }, pickedBy: null, gating: false, followUp: false },
-    { id: 5107, repo: "wordcraft", items: [item("wordcraft", 702, "issue", "Track changes lose author colours after save")], kind: "Fix issues", tier: "top", model: "opus", estCostUsd: 1.92, waitedMs: 34 * MIN, why: { code: "no-repo-access", text: "No ready Task Runner's user can take calls on wordcraft" }, pickedBy: null, gating: false, followUp: false },
+    { id: 5101, repo: "photocraft", items: [item("photocraft", 10012, "pr", "Fix crash when the curves panel is closed while a preview renders")], step: "opus-review", kind: "Review pull requests", tier: "top", model: "opus", estCostUsd: 0.84, waitedMs: 11 * MIN, why: { code: "picked", text: `Picked by ${me.login}` }, pickedBy: me.login, gating: false, followUp: false },
+    { id: 5102, repo: "designcraft", items: [item("designcraft", 1520, "pr", "Snap guides to the artboard edge on resize")], step: "opus-review", kind: "Review pull requests", tier: "top", model: "opus", estCostUsd: 0.79, waitedMs: 8 * MIN, why: { code: "picked", text: "Picked by oakmoss" }, pickedBy: "oakmoss", gating: false, followUp: false },
+    { id: 5108, repo: "designcraft", forLogin: "kiri-n", items: [item("designcraft", 1484, "pr", "Add Hungarian spellchecking and nonstandard hyphenation")], step: "decide", kind: "Answer conversations", tier: "top", model: "opus", estCostUsd: 0.38, waitedMs: 2 * MIN, why: staff ? { code: "bound", text: "Waiting for kiri-n's Task Runner: it is busy" } : { code: "bound", text: "Waiting for the asker's own Task Runner: it is busy" }, pickedBy: null, gating: false, followUp: false },
+    { id: 5103, repo: "pdfcraft", items: [item("pdfcraft", 2210, "pr", "Keep form field order when flattening annotations")], step: "fixup", kind: "Push fix-ups", tier: "mid", model: "sonnet", estCostUsd: 0.31, waitedMs: 6 * MIN, why: { code: "session", text: "Waiting for desk-1, which holds its session" }, pickedBy: null, gating: false, followUp: true },
+    { id: 5104, repo: "vectorcraft", items: [item("vectorcraft", 873, "issue", "Boolean union drops the last subpath of compound shapes"), item("vectorcraft", 880, "issue", "Union of overlapping circles leaves a sliver")], step: "implement", kind: "Implement issues", tier: "top", model: "opus", estCostUsd: 0.42, waitedMs: 19 * MIN, why: { code: "manual-only", text: "Every ready Task Runner is Manual only" }, pickedBy: null, gating: false, followUp: false, lastError: "the harness exited with code 1: rate limited" },
+    { id: 5105, repo: "filmcraft", items: [item("filmcraft", 3301, "pr", "Trim clips on the timeline with the keyboard")], step: "classify-new", kind: "Classify new and changed items", tier: "small", model: "haiku", estCostUsd: 0.004, waitedMs: 3 * MIN, why: { code: "busy", text: "Every Task Runner that may take it is busy" }, pickedBy: null, gating: true, followUp: false },
+    { id: 5106, repo: "deckcraft", items: [item("deckcraft", 455, "pr", "Export speaker notes to the PPTX notes pane")], step: "opus-review", kind: "Review pull requests", tier: "top", model: "opus", estCostUsd: null, waitedMs: 2 * MIN, why: { code: "behind", text: "4 calls ahead" }, pickedBy: null, gating: false, followUp: false },
+    { id: 5107, repo: "wordcraft", items: [item("wordcraft", 702, "issue", "Track changes lose author colours after save")], step: "fixissue", kind: "Fix issues", tier: "top", model: "opus", estCostUsd: 1.92, waitedMs: 34 * MIN, why: { code: "no-repo-access", text: "No ready Task Runner's user can take calls on wordcraft" }, pickedBy: null, gating: false, followUp: false },
   ];
   const pickMax = 3;
   const picks = () => queue.filter((r) => r.pickedBy === me.login).length;
-  const view = (): ModelQueue => ({
-    calls: queue.map(({ pickedBy, repo, lastError, forLogin, ...r }) => ({
+  const view = (f: ModelQueueFilter = {}): ModelQueue => ({
+    calls: queue.filter((r) => (!f.repo || r.repo === f.repo) && (!f.step || r.step === f.step) && (!f.person || r.pickedBy === f.person || r.forLogin === f.person)
+      && (!f.runner || (runners.some((x) => x.label === f.runner) && (r.pickedBy === me.login || r.forLogin === me.login)))).map(({ pickedBy, repo, lastError, forLogin, ...r }) => ({
       ...structuredClone(r),
       ...(staff && lastError && { lastError }),
       why: r.why.code === "picked" && !staff ? { code: "picked" as const, text: "Picked by a user" } : r.why,
@@ -169,9 +170,17 @@ export function createMcpMock(me: User, changed: () => void): Pick<Api, "mcp" | 
         changed();
         return wait({ ok: true });
       },
+      async rename(id, raw) {
+        const label = raw.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
+        if (!label || label.length > 64) throw new Error("a Task Runner's name is 1 to 64 characters");
+        if (!runners.some((r) => r.tokenId === id)) throw new Error("you have no such Task Runner");
+        runners = runners.map((r) => (r.tokenId === id ? { ...r, label } : r));
+        changed();
+        return wait({ ok: true });
+      },
     },
     modelQueue: {
-      get: () => wait(view()),
+      get: (f) => wait(view(f)),
       async pick(id) {
         const r = rowOf(id);
         if (!view().calls.find((c) => c.id === id)?.pickable) throw new Error("this call cannot be picked now");

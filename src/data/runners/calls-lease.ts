@@ -38,7 +38,7 @@ export async function leaseCall(db: Db, req: LeaseRequest): Promise<Lease | "lim
       if (!req.live()) return "gone";
       const s = req.source;
       const runId = await openRun(db, { jobId: s.jobId, step: s.step, stage: s.stage, promptId: s.promptId, promptVersion: s.promptVersion, provider: "claude", model: s.askedModel,
-        items: s.items, prompt: req.prompt, remote: { callId: req.id, userLogin: login, harness: claim.harness, reportedModel: req.model } });
+        items: s.items, prompt: req.prompt, remote: { callId: req.id, userLogin: login, tokenId: caller.tokenId, harness: claim.harness, reportedModel: req.model } });
       const r = await q.get(q.k.updateTable("main.remote_calls").set((eb) => ({
         state: "leased", token_id: caller.tokenId, user_login: login, harness: claim.harness, harness_version: claim.harnessVersion, model: req.model, root: claim.root ?? null,
         lease_secret_hash: sha256hex(secret), leased_at: now, heartbeat_at: now, started_at: null, lease_timeout_ms: req.timeoutMs ?? null, claim_id: claim.requestId ?? null, run_id: runId,

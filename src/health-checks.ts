@@ -426,10 +426,10 @@ async function remoteStarvedCheck({ nowMs, f }: CheckCtx): Promise<Check[]> {
 async function remoteManualCheck({ f }: CheckCtx): Promise<Check[]> {
   const r = f.runner;
   if (!r) return [];
-  if (!r.ready || r.manualOnly < r.ready) return [ok("remote-manual", "/model-queue")];
+  if (!r.ready || r.manualOnly < r.ready) return [ok("remote-manual", "/agents?state=waiting")];
   const q = r.queued;
-  if (!q.total || q.oldestMs === null) return [ok("remote-manual", "/model-queue")];
-  return [{ id: "remote-manual", state: "warn", count: q.total, since: new Date(q.oldestMs).toISOString(), to: "/model-queue",
+  if (!q.total || q.oldestMs === null) return [ok("remote-manual", "/agents?state=waiting")];
+  return [{ id: "remote-manual", state: "warn", count: q.total, since: new Date(q.oldestMs).toISOString(), to: "/agents?state=waiting",
     text: `${q.total} model call${q.total === 1 ? " has" : "s have"} waited over ${minutes(THRESHOLDS.remoteQueuedMs)} while every ready Task Runner is Manual only`,
     brief: "Model calls wait for a pick: every ready Task Runner is Manual only" }];
 }
@@ -443,9 +443,9 @@ async function remoteNoTakerCheck({ f }: CheckCtx): Promise<Check[]> {
   const r = f.runner;
   if (!r) return [];
   const rows = r.noTakerRepos;
-  if (!rows.length) return [ok("remote-no-taker", "/model-queue")];
+  if (!rows.length) return [ok("remote-no-taker", "/agents?state=waiting")];
   const n = rows.length;
-  return [{ id: "remote-no-taker", state: "warn", count: n, since: new Date(Math.min(...rows.map((x) => x.since))).toISOString(), to: "/model-queue",
+  return [{ id: "remote-no-taker", state: "warn", count: n, since: new Date(Math.min(...rows.map((x) => x.since))).toISOString(), to: "/agents?state=waiting",
     text: `No ready Task Runner has been able to take calls on ${clip(rows.map((x) => x.repo).join(", "), 120)} for over ${minutes(NO_TAKER_MS)}: their model work waits`,
     brief: "Some repos have no Task Runner that may take their model calls" }];
 }
@@ -481,7 +481,7 @@ export async function interactiveTakers(db: Db, nowMs: number): Promise<{ applie
  * past THRESHOLDS.interactiveWaitMs (claims failing although a taker looks ready). The text names no login.
  */
 async function interactiveNoTakerCheck({ db, nowMs, f }: CheckCtx): Promise<Check[]> {
-  const id = "interactive-no-taker", to = "/model-queue";
+  const id = "interactive-no-taker", to = "/agents?state=waiting";
   if (!f.takers || !f.runner) return [ok(id, to)];
   const t = await takersOf(db, f.takers, nowMs);
   if (!t.ready) return [{ id, state: "warn", to, since: null, text: `No Task Runner takes Discord calls: ${t.why}`, brief: "No Task Runner takes Discord calls" }];

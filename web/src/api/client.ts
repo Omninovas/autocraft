@@ -12,6 +12,7 @@ import type {
   MySettings,
   MySettingsChange,
   ModelQueue,
+  ModelQueueFilter,
   LoginScopes,
   PendingRunnerLogin,
   RunnersReply,
@@ -173,9 +174,11 @@ export interface Api {
     items(query: MaintainItemsQuery): Promise<MaintainItems>;
     /** The Items browser: one page of the items matching a search with qualifiers; the page's project narrows it. */
     browse(query: BrowseQuery): Promise<BrowseResult>;
-    /** Sends a command written in the dashboard's box; the list form (`merge:` then items) names the items. */
-    /** `asked`: the `asked` of the rows shown, by repo#number. */
-    command(text: string, asked?: Record<string, string>): Promise<MaintainCommandResult>;
+    /**
+     * Sends a command written in the dashboard's box for `items` (repo#number), or for the items its list form (`merge:` then items)
+     * names. `asked`: the `asked` of the rows shown, by repo#number.
+     */
+    command(text: string, opts?: { items?: string[]; asked?: Record<string, string> }): Promise<MaintainCommandResult>;
     /** Repos: every tracked repo the reader may see with its counts, Automatic state and paused steps. */
     repos(): Promise<MaintainRepo[]>;
     /** Per visible repo, the started items that wait for an answer; repos with none are left out. */
@@ -287,10 +290,12 @@ export interface Api {
     revoke(id: number): Promise<unknown>;
     /** Sets one of the user's runners' agent access and answering. */
     setScopes(id: number, scopes: LoginScopes): Promise<unknown>;
+    /** Renames one of the user's runners (operators: anyone's); 1 to 64 characters. */
+    rename(id: number, label: string): Promise<unknown>;
   };
   /** The queued model calls of the user-local inference mode; maintainers and operators pick calls for their own Task Runners. */
   modelQueue: {
-    get(): Promise<ModelQueue>;
+    get(filter?: ModelQueueFilter): Promise<ModelQueue>;
     pick(id: number): Promise<unknown>;
     /** The user's own pick; operators clear anyone's. */
     unpick(id: number): Promise<unknown>;

@@ -400,6 +400,7 @@ export function apiRoutes(opts: ApiOptions = {}): Route[] {
     post("/api/runners/deny", runners.deny),
     post("/api/runners/revoke", runners.revoke),
     post("/api/runners/scopes", runners.scopes),
+    post("/api/runners/rename", runners.rename),
     get("/api/model-queue", modelQueue.get),
     post("/api/model-queue/:id/pick", modelQueue.pick),
     post("/api/model-queue/:id/unpick", modelQueue.unpick),

@@ -107,11 +107,11 @@ function itemsFor(me: User, query: MaintainItemsQuery): MaintainItems {
   return { rows, counts };
 }
 
-function commandFor(me: User, text: string): MaintainCommandResult {
-  const m = /^([^:\n]+):([\s\S]*)$/.exec(text.trim());
-  const refs = m ? m[2]!.split(/[\s,]+/).filter(Boolean) : [];
+function commandFor(me: User, text: string, ticked: string[] = []): MaintainCommandResult {
+  const m = ticked.length ? null : /^([^:\n]+):([\s\S]*)$/.exec(text.trim());
+  const refs = ticked.length ? ticked : m ? m[2]!.split(/[\s,]+/).filter(Boolean) : [];
   const words = (m ? m[1]! : text).trim();
-  if (!m || !refs.length || !/^(review|fix-up|implement|merge|backlog|close|hold|resume|stop)\b/i.test(words)) {
+  if (!refs.length || !/^(review|fix-up|implement|merge|backlog|close|hold|resume|stop)\b/i.test(words)) {
     const line = `Not run: "${text.trim().split("\n")[0]}" is not clear. Write a command, then a colon and the items, e.g. "merge: photocraft#123".`;
     return { items: [], lines: [line] };
   }
@@ -147,7 +147,7 @@ export function createMaintainMock(me: User): Pick<Api, "maintain"> {
       },
       items: (query) => new Promise((r, j) => setTimeout(() => { try { r(structuredClone(itemsFor(me, query))); } catch (e) { j(e); } }, 60)),
       browse: (query) => new Promise((r) => setTimeout(() => r(structuredClone(browseFor(me, query))), 60)),
-      command: (text) => new Promise((r) => setTimeout(() => r(commandFor(me, text)), 120)),
+      command: (text, opts) => new Promise((r) => setTimeout(() => r(commandFor(me, text, opts?.items)), 120)),
       async repos(): Promise<MaintainRepo[]> {
         const mine = repos.map((r) => ({ ...r, canRun: me.runRepos.includes(r.name), trips: r.trips.map((t) => ({ ...t, canResume: me.runRepos.includes(r.name) })) }));
         return new Promise((res) => setTimeout(() => res(structuredClone(mine)), 60));
@@ -176,7 +176,7 @@ export function createMaintainMock(me: User): Pick<Api, "maintain"> {
                 mine: own.slice(0, 8),
                 mineTotal: own.length,
                 recent: [],
-                runner: me.role === "operator" ? { mine: [{ name: "laptop", online: true, running: 1 }], others: 2 } : { mine: [], others: 3 },
+                runner: me.role === "operator" ? { mine: [{ name: "desk-1", online: true, running: 1 }], others: 2 } : { mine: [], others: 3 },
                 attention,
               };
         return new Promise((r) => setTimeout(() => r(structuredClone(home)), 60));

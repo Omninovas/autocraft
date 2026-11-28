@@ -24,6 +24,7 @@ import { featuresRepoOnlySqlite } from "./db/feature-repo-only.ts";
 import { pingsSettledSqlite } from "./db/pings-settled.ts";
 import { holdsToItemsSqlite } from "./db/holds-to-items.ts";
 import { backfillRefusalsSqlite } from "./db/refused-runs.ts";
+import { backfillRunTokensSqlite } from "./db/run-tokens.ts";
 import { chatBackfillSqlite } from "./db/chat-backfill.ts";
 import { ACTIVE_LEG_INDEX, ACTIVE_LEG_STATES, builtAfterCopy, copyStateSqlite, oneActiveLegSqlite } from "./db/state-copy.ts";
 
@@ -463,6 +464,8 @@ const STATE_COLUMNS: [table: string, column: string, type: string][] = [
   // The lowest (repo, number) of a model call's items.
   ["agent_runs", "first_repo", "TEXT"],
   ["agent_runs", "first_number", "INTEGER"],
+  // The Task Runner credential whose lease ran the call (user-local mode), so the Agents page filters by runner.
+  ["agent_runs", "token_id", "INTEGER"],
   // A Task Runner's idle claim and machine, kept with its status row (copied from mcp_tokens).
   ["remote_helpers", "idle_claim_at", "INTEGER"],
   ["remote_helpers", "idle_tiers", "TEXT"],
@@ -486,6 +489,9 @@ const STATE_INDEXES = [
   // The calls that ended lately (the live board's workers), and a repo's newest calls (the activity feed of one repo).
   "CREATE INDEX IF NOT EXISTS main.agent_runs_ended ON agent_runs(ended_at)",
   "CREATE INDEX IF NOT EXISTS main.agent_runs_first ON agent_runs(first_repo, started_at)",
+  // One Task Runner's or one person's calls, newest first (the Agents page's runner and person filters).
+  "CREATE INDEX IF NOT EXISTS main.agent_runs_token ON agent_runs(token_id, id) WHERE token_id IS NOT NULL",
+  "CREATE INDEX IF NOT EXISTS main.agent_runs_login ON agent_runs(user_login, id) WHERE user_login IS NOT NULL",
   // The implementation a PR belongs to.
   "CREATE INDEX IF NOT EXISTS main.implementations_pr ON implementations(repo, pr_number) WHERE pr_number IS NOT NULL",
   // The implement workflows linked to a PR.
@@ -508,7 +514,7 @@ export const HISTORY_COPY_SQL = `INSERT INTO main.opus_review_history (repo, num
   WHERE NOT EXISTS (SELECT 1 FROM main.opus_review_history h WHERE h.repo = o.repo AND h.number = o.number AND h.head_oid = o.head_oid AND h.at = o.at)`;
 
 // Bump when migrateValues() or backfill() change what they do.
-const MIGRATION_VERSION = 23;
+const MIGRATION_VERSION = 24;
 
 // Rows written before their column existed.
 function backfill(db: DatabaseSync): void {
@@ -553,6 +559,7 @@ function backfill(db: DatabaseSync): void {
   featuresRepoOnlySqlite(db);
   holdsToItemsSqlite(db);
   backfillRefusalsSqlite(db);
+  backfillRunTokensSqlite(db);
   chatBackfillSqlite(db);
   pingsSettledSqlite(db);
   // Reviews made before snapshots existed count as having read everything up to now: no wave of re-reviews.

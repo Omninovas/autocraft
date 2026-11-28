@@ -28,6 +28,13 @@ const shown = (i: { repo: string; number: number }): AgentRun["items"][number] =
   ...i, kind: i.number % 3 === 0 ? "issue" : "pr", state: i.number % 5 === 0 ? "closed" : "open", title: `Example title for ${i.repo}#${i.number}`,
 });
 
+/** Who ran a mock call: a person and one of their Task Runners (the mock user's are those of the Connect page). */
+const RUNNERS: Record<string, string[]> = { "kiri-n": ["kiri-mbp"], "ochre-fox": ["desk-1", "studio"], "mara-t": ["mara-ws"] };
+function viaOf(model: string): Pick<AgentRun, "via"> {
+  const login = pick(Object.keys(RUNNERS));
+  return { via: { login, runner: pick(RUNNERS[login]!), harness: pick(["claude", "claude", "codex"]), model: model === "opus" ? "claude-opus-4-5" : "claude-haiku-4-5" } };
+}
+
 function makeRun(id: number, startedMsAgo: number, running: boolean): AgentRun {
   const s = pick(STEPS);
   const n = s.step === "classify-new" ? 1 + Math.floor(rnd() * 30) : s.step === "opus-review" ? 1 + Math.floor(rnd() * 4) : 1 + Math.floor(rnd() * 8);
@@ -43,7 +50,7 @@ function makeRun(id: number, startedMsAgo: number, running: boolean): AgentRun {
     startedAt: iso(startedMsAgo), endedAt: running ? null : iso(startedMsAgo - dur),
     inputTokens: tokens, outputTokens: running ? Math.round(tokens * 0.03) : Math.round(tokens * 0.08),
     cacheReadTokens: s.provider === "jev" ? null : Math.round(tokens * 0.5), cacheWriteTokens: s.provider === "jev" ? null : Math.round(tokens * 0.1),
-    ...(s.provider === "claude" && { via: { login: pick(["kiri-n", "ochre-fox", "mara-t"]), harness: pick(["claude", "claude", "codex"]), model: s.model === "opus" ? "claude-opus-4-5" : "claude-haiku-4-5" } }),
+    ...(s.provider === "claude" && viaOf(s.model)),
     summary: running ? null : failed ? "timeout after 600 s" : s.step === "classify-new" ? `${n} classified` : `${Math.max(0, n - 1)} take, ${Math.min(1, n)} hold`,
   };
 }
@@ -157,9 +164,10 @@ export function createAgentsMock(): Pick<Api, "agents" | "rates" | "transcriptSt
   return {
     agents: {
       list(f) {
-        if (f.state === "running") return wait({ runs: RUNNING.filter((r) => (!f.step || r.step === f.step)), nextCursor: null });
+        const fits = (r: AgentRun) => (!f.step || r.step === f.step) && (!f.repo || r.items.some((i) => i.repo === f.repo)) && (!f.person || r.via?.login === f.person) && (!f.runner || r.via?.runner === f.runner);
+        if (f.state === "running") return wait({ runs: RUNNING.filter(fits), nextCursor: null });
         const rows = RECENT.filter(
-          (r) => (!f.state || f.state === "recent" || r.state === f.state) && (!f.step || r.step === f.step) && (!f.repo || r.items.some((i) => i.repo === f.repo)) && (!f.cursor || r.id < Number(f.cursor))
+          (r) => (!f.state || f.state === "recent" || f.state === "finished" || r.state === f.state) && fits(r) && (!f.cursor || r.id < Number(f.cursor))
             && (!f.refused || (!!r.refusal && inWindow(r, f.window))),
         );
         const limit = f.limit ?? 50;

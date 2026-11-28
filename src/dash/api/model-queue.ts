@@ -1,11 +1,13 @@
-// The model call queue of the user-local inference mode (GET /api/model-queue) and picks ("Run on my Task Runner": POST
+// The model call queue of the user-local inference mode (GET /api/model-queue, the Agents page's Waiting part) and picks ("Run on my Task Runner": POST
 // /api/model-queue/<id>/pick and /unpick). Viewers see the calls of repos they can see, with no picker logins, errors or
 // manual logins, and never repo-less calls; maintainers and operators see those; operators also end any user's pick.
 import type { ModelQueue, ModelQueueCall } from "../../../web/src/api/types.ts";
 import { pickerLogins } from "../../remote/calls.ts";
 import { manualOnly } from "../../remote/manual-only.ts";
 import { pickCall, pickerState, pickRefusal, unpickCall } from "../../remote/picks.ts";
-import { queueView } from "../../remote/queue-view.ts";
+import { queueView, type QueuedCall } from "../../remote/queue-view.ts";
+import { loadRunnersByLabel } from "../../data/runners/index.ts";
+import { runnerLabelFor } from "../../remote/runner-label.ts";
 import { HttpError } from "../server/util.ts";
 import type { Req } from "../types.ts";
 import { shownMap, withShown } from "./shown.ts";
@@ -40,9 +42,29 @@ async function estimates_(db: Db, promptIds: string[], nowMs: number): Promise<M
   return out;
 }
 
+/**
+ * The calls the query narrows to (`repo`, `step`; staff also `person` and `runner`): a waiting call runs on no Task Runner yet, so a
+ * person or a runner's owners narrow it to the calls picked by or bound to them. Null: every call.
+ */
+async function filterOf(db: Db, req: Req, staff: boolean): Promise<((c: QueuedCall) => boolean) | null> {
+  const q = (k: string) => req.query.get(k) || undefined;
+  const repo = q("repo"), step = q("step"), person = q("person"), runner = q("runner");
+  if (!repo && !step && !person && !runner) return null;
+  if ((person || runner) && !staff) throw new HttpError(403, "operators and maintainers only");
+  let whose: Set<string> | null = person ? new Set([person.toLowerCase()]) : null;
+  if (runner) {
+    // Only the runners whose label the reader may see (src/remote/runner-label.ts) name their owners.
+    const owners = new Set((await loadRunnersByLabel(db, runner)).filter((n) => runnerLabelFor(n, req.user.login) !== null).map((n) => n.login.toLowerCase()));
+    whose = whose ? new Set([...whose].filter((l) => owners.has(l))) : owners;
+  }
+  return (c) => (!repo || c.repos.includes(repo)) && (!step || c.step === step)
+    && (!whose || [c.pickedBy, c.forLogin].some((l) => l !== null && whose!.has(l.toLowerCase())));
+}
+
 export async function get(db: Db, req: Req): Promise<ModelQueue> {
   const nowMs = Date.now();
   const staff = canSeeInternals(req);
+  const only = await filterOf(db, req, staff);
   const hidden = await hiddenRepos(db, req);
   // Operators see every repo; others only repos on their allow-list.
   const visible = req.user.role === "operator" ? null : new Set(hidden.visible ?? []);
@@ -52,11 +74,12 @@ export async function get(db: Db, req: Req): Promise<ModelQueue> {
   const out: ModelQueueCall[] = [];
   const [cost, known] = await Promise.all([estimates_(db, calls.map((c) => c.promptId), nowMs), shownMap(db, calls.flatMap((c) => c.refs))]);
   for (const c of calls) {
+    if (only && !only(c)) continue;
     if (visible && c.repos.some((r) => !visible.has(r))) continue;
     if (!staff && !c.repos.length) continue;
     const pickable = state.canPick && (await pickRefusal(state, user, { id: c.id, tier: c.tier, promptId: c.promptId, parentId: c.followUp ? c.id : null, repos: c.repos, authors: c.authors, seenAt: c.seenAt, pickedBy: c.pickedBy, pickUntil: c.pickUntil, forLogin: c.forLogin }, nowMs, async (l) => fresh.has(l))) === null;
     out.push({
-      id: c.id, items: await withShown(db, c.refs, known), kind: stepTitle(c.step), tier: c.tier, model: c.model, estCostUsd: cost.get(c.promptId) ?? null, waitedMs: c.waitedMs, why: c.why,
+      id: c.id, items: await withShown(db, c.refs, known), step: c.step, kind: stepTitle(c.step), tier: c.tier, model: c.model, estCostUsd: cost.get(c.promptId) ?? null, waitedMs: c.waitedMs, why: c.why,
       picked: c.pickedBy === null ? null : staff ? { login: c.pickedBy } : {}, pickable, gating: c.gating, followUp: c.followUp,
       ...(staff && c.lastError && { lastError: c.lastError }),
     });

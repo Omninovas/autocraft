@@ -66,6 +66,22 @@ export async function setRunnerScopes(db: Db, login: Login, id: number, scopes: 
     .where("id", "=", id).where("login", "=", login).where("kind", "=", "runner").where("expires_at", ">", iso(Date.now())))).changes) === 1;
 }
 
+/**
+ * Sets the label of a live runner token: one of `owner`'s, or anyone's when `owner` is null. Returns the token's login and its label
+ * before, or null when there is no such token. 2 statements in one transaction.
+ */
+export async function renameRunner(db: Db, id: number, label: string, owner: Login | null): Promise<{ login: string; was: string | null } | null> {
+  const q = queryDb(db);
+  return await db.write(async () => {
+    const at = iso(Date.now());
+    const row = await q.get(q.k.selectFrom("mcp_tokens").select(["login", "label"]).where("id", "=", id).where("kind", "=", "runner").where("expires_at", ">", at)
+      .$if(owner !== null, (x) => x.where("login", "=", owner!)));
+    if (!row) return null;
+    await q.run(q.k.updateTable("mcp_tokens").set({ label }).where("id", "=", id));
+    return { login: row.login, was: row.label ?? null };
+  });
+}
+
 /** One live runner token of the login. */
 export async function loadRunnerTokenOf(db: Db, login: Login, id: number): Promise<{ canAnswer: boolean } | null> {
   const q = queryDb(db);

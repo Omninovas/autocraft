@@ -75,3 +75,23 @@ test("viewers cannot filter by review verdict or staff-only flags: those terms a
   assert.deepEqual(viewer.unknown, ["review:clean", "-is:security"]);
   assert.equal(forReader(parseItemQuery("review:clean"), true).terms.length, 1, "staff keep the filter");
 });
+
+test("is:draft matches only open draft pull requests, is:ready only open non-draft pull requests", async () => {
+  const db = await connectDb(":memory:");
+  try {
+    const item = (number: number, o: Record<string, unknown>) => ({
+      repo: "app", number, kind: "pr", state: "OPEN", is_draft: 0, title: `t${number}`, author: "ann", author_association: "MEMBER", labels: "[]", comments_count: 0, created_at: at(number), updated_at: at(number), ...o,
+    });
+    await db.run(db.k.insertInto("main.items").values([
+      item(1, { is_draft: 1 }), item(2, {}), item(3, { is_draft: 1, state: "CLOSED" }), item(4, { state: "MERGED" }), item(5, { kind: "issue" }),
+    ]));
+    const scope = { repos: ["app"], hidden: Object.assign([], { visible: ["app"] }), staff: false, login: "ann" };
+    const numbers = async (q: string) => (await loadBrowsePage(db, scope, parseItemQuery(q), { offset: 0, limit: 50, normalWeight: 5 })).rows.map((r) => Number(r.number)).sort();
+    assert.deepEqual(await numbers("is:draft"), [1]);
+    assert.deepEqual(await numbers("draft:true"), [1]);
+    assert.deepEqual(await numbers("is:ready"), [2]);
+    assert.deepEqual(await numbers("draft:false"), [2]);
+  } finally {
+    await db.close();
+  }
+});

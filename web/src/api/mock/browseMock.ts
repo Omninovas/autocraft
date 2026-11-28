@@ -93,7 +93,7 @@ function termHolds(r: Row, t: QueryTerm): boolean {
     case "autocraft": return any((v) => r.autocraft === v);
     case "has": return any((v) => v === "pr" ? r.linked !== null : v === "label" ? r.labels.length > 0 : v === "priority" ? r.priority !== null : v === "area" ? r.area !== null
       : v === "kind" ? r.classified !== null : v === "discord" ? r.discord > 0 : r.replied);
-    case "flag": return t.values.every((v) => v === "draft" ? r.draft : v === "outside" ? r.outside : v === "mine" ? r.mine : v === "asked" ? r.asksYou
+    case "flag": return t.values.every((v) => v === "draft" ? r.kind === "pr" && r.state === "open" && r.draft : v === "ready" ? r.kind === "pr" && r.state === "open" && !r.draft : v === "outside" ? r.outside : v === "mine" ? r.mine : v === "asked" ? r.asksYou
       : v === "approved" ? r.approved : v === "duplicate" ? r.duplicate : v === "security" ? r.labels.includes("security") : false);
   }
 }

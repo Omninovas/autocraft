@@ -261,7 +261,6 @@ export function createHttpApi(): Api {
       heldAuthors: () => get("/api/pipeline/outside/held"),
       releaseAuthor: (author) => post("/api/pipeline/outside/release", { author }),
       setOutsideLimits: (input) => put("/api/pipeline/outside-limits", input),
-      setBlockers: (input) => put("/api/pipeline/blocker-thresholds", input),
     },
     envs: {
       list: () => get("/api/envs"),

@@ -20,7 +20,7 @@ function useMention(): string {
 
 const MAIN = COMMANDS.filter((c) => !c.more);
 const MORE = COMMANDS.filter((c) => c.more);
-const BLOCKERS: Blocker[] = ["major-finding", "author-commits", "failed-twice", "beyond-agreed", "outside-purpose"];
+const BLOCKERS: Blocker[] = ["major-finding", "author-commits", "failed-twice", "beyond-agreed"];
 const ITEM = "photocraft#803";
 
 /** Phrasings the parser reads, with the command each one runs. */

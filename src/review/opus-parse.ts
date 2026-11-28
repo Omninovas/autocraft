@@ -267,7 +267,8 @@ export const RECOMMENDATION_CHARS = 300;
 export function parseReviewWorkflow(r: Record<string, unknown>, partOf: (n: number) => number | null = (n) => n, keepRec = true, hold?: Blocking): ReviewWorkflow | null {
   const o = r.outside_purpose as { lines?: unknown; note?: unknown } | null | undefined;
   const lines = o && typeof o === "object" && typeof o.lines === "number" && Number.isFinite(o.lines) && o.lines > 0 ? Math.round(o.lines) : 0;
-  const note = lines && typeof o!.note === "string" ? o!.note : "";
+  // The note may be filed in the PR's public follow-up issue: one that leaks the reference is not kept.
+  const note = lines && typeof o!.note === "string" && !REFERENCE_LEAK.test(o!.note) ? o!.note : "";
   const outside = lines ? { lines, note: note.replace(/\s+/g, " ").trim().slice(0, OUTSIDE_NOTE_CHARS) } : null;
   const x = r.recommendation as { text?: unknown; fix?: unknown; merge?: unknown; close?: unknown } | null | undefined;
   const text = x && typeof x === "object" && typeof x.text === "string" && x.text.trim() && !REFERENCE_LEAK.test(x.text) ? firstSentence(x.text.replace(/\s+/g, " ").trim()).slice(0, RECOMMENDATION_CHARS) : null;

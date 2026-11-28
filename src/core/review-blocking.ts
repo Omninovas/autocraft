@@ -24,17 +24,27 @@ export const holdGoesOn = (verdict: string, hold: Blocking | null | undefined, a
 export const verdictToAct = <V extends string>(verdict: V, fixes: readonly Fix[], dropped: readonly string[] | undefined, approved: boolean, hold?: Blocking | null, blockedBy: readonly string[] = []): V | "take" =>
   holdGoesOn(verdict, hold, approved, blockedBy) || (verdict === "take-fix" && fixes.length > 0 && fixesToMake(fixes, dropped, approved).length === 0) ? "take" : verdict;
 
-/** A review as the follow-up rules read it: its verdict, fixes, hold class and the items a hold waits for. */
-export type ReviewForFollowUps<F extends Fix> = { verdict: string; fixes: readonly F[]; hold?: Blocking | null; blockedBy?: readonly string[] };
+/** Changed lines of a PR that do something other than what its title and body set out to do, as its review counted and named them. */
+export type OutsidePurpose = { lines: number; note: string };
+
+/** The follow-up line of lines outside the PR's purpose: "Outside the pull request's purpose (24 lines): <note>". */
+export const outsideText = (o: OutsidePurpose): string => `Outside the pull request's purpose (${o.lines} lines): ${o.note.trim()}`;
+
+/** A review as the follow-up rules read it: its verdict, fixes, hold class, the items a hold waits for and its lines outside the PR's purpose. */
+export type ReviewForFollowUps<F extends Fix> = { verdict: string; fixes: readonly F[]; hold?: Blocking | null; blockedBy?: readonly string[]; outside?: OutsidePurpose | null };
 
 /**
- * What the review of a PR approved for merge files as follow-ups: its fixes that do not block it and nobody dropped, and the reason of
- * a hold that goes on (null when the hold gave none: there is nothing to file).
+ * What the review of a PR approved for merge files as follow-ups: its fixes that do not block it and nobody dropped, the reason of
+ * a hold that goes on (null when the hold gave none: there is nothing to file), and, when the PR goes on, its lines outside the PR's purpose.
  */
-export const reviewFollowUps = <F extends Fix>(r: ReviewForFollowUps<F>, dropped: readonly string[] | undefined): { fixes: F[]; hold: string | null } => ({
-  fixes: r.verdict === "take-fix" ? followUpFixes(r.fixes, dropped) : [],
-  hold: holdGoesOn(r.verdict, r.hold, true, r.blockedBy) && r.hold!.why.trim() ? r.hold!.why : null,
-});
+export const reviewFollowUps = <F extends Fix>(r: ReviewForFollowUps<F>, dropped: readonly string[] | undefined): { fixes: F[]; hold: string | null; outside: OutsidePurpose | null } => {
+  const goesOn = r.verdict === "take" || r.verdict === "take-fix" || holdGoesOn(r.verdict, r.hold, true, r.blockedBy);
+  return {
+    fixes: r.verdict === "take-fix" ? followUpFixes(r.fixes, dropped) : [],
+    hold: holdGoesOn(r.verdict, r.hold, true, r.blockedBy) && r.hold!.why.trim() ? r.hold!.why : null,
+    outside: goesOn && r.outside && r.outside.lines > 0 && r.outside.note.trim() ? r.outside : null,
+  };
+};
 
 /** A review's claim as the follow-up rules read it: its impact and the fix it named. */
 type ClaimLike = { impact?: string; fix?: { file: string; change: string } };

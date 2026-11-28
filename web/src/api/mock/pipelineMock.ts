@@ -101,7 +101,6 @@ export function createPipelineMock(me: User, changed: () => void): Pick<Api, "pi
   const jobs = seed();
   const steps = structuredClone(STEPS);
   let next = 52;
-  const blockers = { outsidePurposeMin: 20 };
   const flag = { enabled: !MOCK_DRAIN, draining: MOCK_DRAIN, changedBy: "ochre-fox" as string | null, changedAt: iso(300) as string | null };
   const limits: StageLimit[] = [
     ["classify-new", "Classify new and changed items", 2000, 412], ["embed", "Embed items", null, 0], ["premerge", "Review before merging", 100, 100],
@@ -121,7 +120,7 @@ export function createPipelineMock(me: User, changed: () => void): Pick<Api, "pi
   limits.find((l) => l.step === "merge")!.trips = [
     { key: "merge:deckcraft", repo: "deckcraft", reason: "main CI of deckcraft is red after our merge of #2031", since: iso(80), canResume: true },
   ];
-  const state = (): PipelineState => ({ ...flag, heartbeat: iso(0), limits, outside: { ...outside }, blockers: { ...blockers } });
+  const state = (): PipelineState => ({ ...flag, heartbeat: iso(0), limits, outside: { ...outside } });
   const requireOperator = () => {
     if (me.role !== "operator") throw new Error("only operators run or cancel pipeline steps and change the pipeline switch and limits");
   };
@@ -188,13 +187,6 @@ export function createPipelineMock(me: User, changed: () => void): Pick<Api, "pi
         requireOperator();
         mockSwitch.draining = false;
         Object.assign(flag, { enabled, draining: false, changedBy: me.login, changedAt: new Date(NOW).toISOString() });
-        changed();
-        return wait(state(), 30);
-      },
-      async setBlockers(input) {
-        requireOperator();
-        for (const [k, v] of Object.entries(input)) if (!Number.isInteger(v) || (v as number) < 1) throw new Error(`${k} must be a whole number from 1 to 1000000`);
-        Object.assign(blockers, input);
         changed();
         return wait(state(), 30);
       },

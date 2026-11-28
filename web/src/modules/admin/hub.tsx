@@ -11,11 +11,8 @@ import { useWrite } from "../../lib/hooks";
 import { Button } from "../../ui/atoms/Button";
 import { TimeAgo } from "../../ui/atoms/TimeAgo";
 import { HostFrame, Page } from "../../ui/organisms/Page";
-import { Block } from "../../ui/molecules/Block";
 import { ErrorLine } from "../../ui/atoms/ErrorLine";
-import { TextInput } from "./parts";
 import { OutsideLimits, PipelineSwitch, StageLimits } from "../pipeline/controls";
-import { useEffect, useState } from "react";
 import { cn } from "../../ui/cn";
 
 const AccessView = lazyView(() => import("./accessViews"), "AccessView");
@@ -90,53 +87,10 @@ function HealthView(_: ViewProps) {
   );
 }
 
-const BLOCKER_FIELDS = [
-  { key: "outsidePurposeMin", label: "A change outside the PR's purpose of at least this many lines asks again" },
-] as const;
-
-function BlockerThresholds({ className }: { className?: string }) {
-  const api = useApi();
-  const { data } = useQuery("pipeline-state", (a) => a.pipeline.state());
-  const write = useWrite();
-  const b = data?.blockers;
-  const [text, setText] = useState<Record<string, string>>({});
-  useEffect(() => {
-    if (b) setText({ outsidePurposeMin: String(b.outsidePurposeMin) });
-  }, [b?.outsidePurposeMin]);
-  if (!b) return null;
-  const valid = BLOCKER_FIELDS.every((f) => /^[1-9]\d{0,5}$/.test((text[f.key] ?? "").trim()));
-  const dirty = BLOCKER_FIELDS.some((f) => (text[f.key] ?? "").trim() !== String(b[f.key]));
-  return (
-    <div className={className}>
-      <Block title={t("Blockers")}>
-        <form
-          className="flex flex-col gap-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void write.run("blockers", () => api.pipeline.setBlockers(Object.fromEntries(BLOCKER_FIELDS.map((f) => [f.key, Number(text[f.key])]))));
-          }}
-        >
-          {BLOCKER_FIELDS.map((f) => (
-            <label key={f.key} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-md">
-              <span className="min-w-0 flex-1 basis-56">{t(f.label)}</span>
-              <TextInput inputMode="numeric" value={text[f.key] ?? ""} onChange={(e) => setText({ ...text, [f.key]: e.target.value })} className="w-24 text-ink" />
-            </label>
-          ))}
-          <Button type="submit" size="sm" disabled={!dirty || !valid} loading={write.busy === "blockers"} className="w-fit max-md:h-11">
-            {t("Save")}
-          </Button>
-          <ErrorLine error={write.error} />
-        </form>
-      </Block>
-    </div>
-  );
-}
-
 function SettingsView(_: ViewProps) {
   return (
     <Page title={t("Instance settings")}>
       <PipelineSwitch className="mt-4" />
-      <BlockerThresholds className="mt-4" />
     </Page>
   );
 }

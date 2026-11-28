@@ -1,4 +1,4 @@
-// The six blockers of the maintainer workflow: when AutoCraft stops an item and comes back to a person even though the merge is
+// The blockers of the maintainer workflow: when AutoCraft stops an item and comes back to a person even though the merge is
 // approved. Pure: advance.ts reads the facts and records what this returns; the merge approval stays on the workflow row.
 //
 // Every detector looks only at what happened after `since`, up to when the person who last started or answered the item has seen it (an
@@ -13,7 +13,7 @@ export type BlockerFacts = {
   /** A push that is not ours moved the PR's head off the head the workflow last accepted (`base_head`). A PR's own workflow sends it to the review round instead (advance.ts), so it comes here as a blocker only for an issue's implementation PR. */
   authorPush: { from: string | null; to: string } | null;
   /** The review at the current head, when it was made after `since`. `majors`: numbers of the parts it marks major. */
-  review: { verdict: string; sure: boolean; majors: number[]; outsideLines: number } | null;
+  review: { verdict: string; sure: boolean; majors: number[] } | null;
   /** Steps whose tries failed since `since`, with how many failed. */
   failures: readonly { step: string; count: number }[];
   /** Our pushes since `since`: the files of the latest fix-up. */
@@ -26,7 +26,6 @@ export type BlockerFacts = {
   leg: EndedLeg | null;
   /** A limit of the merge approval that holds our next step back: the pushes of ours since `since` (and the push held). */
   limit?: Limit | null;
-  thresholds: { outsideMin: number };
 };
 
 export type EndedLeg = { reason: string; code?: StopCode | null; head?: string | null };
@@ -86,7 +85,6 @@ export function detectBlocker(f: BlockerFacts): Found | null {
   const l = f.limit;
   if (l?.kind === "pushes") return { blocker: "other", params: { limit: l.kind, count: l.count, step: l.step, reason: `AutoCraft pushed ${l.count} changes since the approval, and the next one waits for an answer` } };
   const r = f.review;
-  if (r && r.outsideLines >= f.thresholds.outsideMin) return { blocker: "outside-purpose", params: { lines: r.outsideLines, limit: f.thresholds.outsideMin } };
   // An unsure review is no blocker: the approval says the change is wanted, so its fixes run and the merge still waits for the
   // pre-merge review and green CI.
   if (r && (r.verdict === "hold" || r.verdict === "close" || r.majors.length)) {

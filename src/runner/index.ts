@@ -28,6 +28,7 @@ import { elect, LOST_LEADER_EXIT } from "../db/leader.ts";
 import { assertFence, FencedError, isFenced, setFence } from "../db/fence.ts";
 import { dropRetired } from "../db/retired.ts";
 import { holdsToItems } from "../db/holds-to-items.ts";
+import { resumeOutsideStops } from "../workflow/outside-resume.ts";
 import { switchOver } from "../db/switch-over.ts";
 import { inClusterApi } from "../build/kube-api.ts";
 import { workerEndpointFromEnv, WorkerEndpointPublisher } from "../build/worker-endpoint.ts";
@@ -111,6 +112,8 @@ async function serve(): Promise<void> {
   if (gone.length) console.log(`runner: dropped ${gone.join(", ")}`);
   const held = await holdsToItems(db);
   if (held) console.log(`runner: ${held} merge holds of an earlier release became held items`);
+  const resumed = await resumeOutsideStops(db);
+  if (resumed.length) console.log(`runner: resumed ${resumed.join(", ")}, stopped by an earlier release at changes outside their purpose`);
   const linked = await linkRepeatedFindings(db);
   if (linked) console.log(`runner: linked ${linked} security findings to the earlier findings they repeat`);
   const fixes = await autoFixConfirmed(db);

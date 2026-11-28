@@ -92,7 +92,7 @@ test("after the limit of pushes of ours since the approval, the next one waits f
     assert.ok(pushing(PUSHES_PER_APPROVAL - 1), step);
     assert.ok(!pushing(PUSHES_PER_APPROVAL), step);
     assert.equal(pushHeld(pushes(PUSHES_PER_APPROVAL)), step);
-    const found = detectBlocker({ entry: "review", approved: true, authorPush: null, review: null, failures: [], fix: null, plannedFiles: [], leg: null, thresholds: { outsideMin: 50 }, limit: { kind: "pushes", count: PUSHES_PER_APPROVAL, step: pushHeld(pushes(PUSHES_PER_APPROVAL))! } });
+    const found = detectBlocker({ entry: "review", approved: true, authorPush: null, review: null, failures: [], fix: null, plannedFiles: [], leg: null, limit: { kind: "pushes", count: PUSHES_PER_APPROVAL, step: pushHeld(pushes(PUSHES_PER_APPROVAL))! } });
     const rec = atBlocker(found!, null, []);
     assert.ok(rec.merges && !rec.parts.fix.length, step);
     assert.match(rec.text, new RegExp(`pushed ${PUSHES_PER_APPROVAL} changes.*Yes lets it go on`), step);

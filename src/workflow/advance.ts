@@ -44,7 +44,6 @@ import { blockWorkflow } from "./block.ts";
 import { checkedOtherHead, codeOf, detectBlocker, premergeStop, type BlockerFacts, type EndedLeg, type Found, type Limit } from "./blockers.ts";
 import { premergeParts } from "./premerge.ts";
 import { afterPush, atBlocker, onConflict, planOf, type ReviewView } from "./recommend.ts";
-import { blockerThresholds } from "./settings.ts";
 import { askedBy, isOpenQuestion, openQuestionOf, viewOf } from "./question.ts";
 import { issueRecommendation, recommendsImplement } from "./issue-review.ts";
 import { listText, ROUND_STEP, stepsFor, type StepName } from "./status.ts";
@@ -105,7 +104,6 @@ type Pass = {
   facts: Map<string, PrFacts>;
   /** Of the issues whose workflow has no PR. */
   issues: Map<string, ItemFacts>;
-  thresholds: BlockerFacts["thresholds"];
   /** The ended jobs of the approved lane per PR, oldest first. */
   laneRuns: Map<string, LaneRun[]>;
   /** The newest review row of each issue review workflow, by workflow id. */
@@ -291,8 +289,8 @@ export async function advanceWorkflows(db: Db, log: (line: string) => void = () 
     for (const w of live) if (!due.includes(w)) wake(failed.get(w.id)!.until);
     const errors = new Map<number, unknown>();
     const issues = live.filter((w) => w.kind === "issue").map((w) => ({ repo: w.repo, number: w.number }));
-    const [implement, goOn, thresholds, issueReviews] = await db.together(() => Promise.all([
-      loadImplementFacts(db, issues, { withPlans: true }), loadGoOnAt(db, live), blockerThresholds(db),
+    const [implement, goOn, issueReviews] = await db.together(() => Promise.all([
+      loadImplementFacts(db, issues, { withPlans: true }), loadGoOnAt(db, live),
       loadIssueReviews(db, live.filter((w) => w.kind === "issue" && w.entry === "review").map((w) => w.id)),
     ]));
     const prRefs = [...new Map(live.flatMap((w) => {
@@ -317,7 +315,7 @@ export async function advanceWorkflows(db: Db, log: (line: string) => void = () 
     const laneRuns = new Map<string, LaneRun[]>();
     for (const r of await loadLaneRuns(db, prRefs, earliest, Object.keys(LANE_STEPS))) (laneRuns.get(key(r.repo, r.number)) ?? laneRuns.set(key(r.repo, r.number), []).get(key(r.repo, r.number))!).push(r);
     const pass: Pass = {
-      at, items, implement, goOn, legs, reviews, patches, fixes, moves, facts, premerge, issues: issueFacts, thresholds: { outsideMin: thresholds.outsidePurposeMin }, laneRuns, issueReviews,
+      at, items, implement, goOn, legs, reviews, patches, fixes, moves, facts, premerge, issues: issueFacts, laneRuns, issueReviews,
     };
     const writes: Writes = { workflows: [], adopt: [], stored: new Set(), closed: [] };
     const moved: Moved[] = [];
@@ -681,7 +679,7 @@ async function advanceOne(db: Db, pass: Pass, writes: Writes, w0: ItemWorkflow):
     // On an approved PR a hold or part that does not block is filed as a follow-up and stops nothing.
     review: fresh ? {
       verdict: holdGoesOn(fresh.verdict, fresh.workflow?.hold, approved, fresh.blocked_by) ? "take" : fresh.verdict, sure: fresh.sure,
-      majors: leg === "fixup" ? [] : partsToMake(plan, fresh.fixes, approved).filter((p) => p.major).map((p) => p.n), outsideLines: fresh.workflow?.outside_purpose?.lines ?? 0,
+      majors: leg === "fixup" ? [] : partsToMake(plan, fresh.fixes, approved).filter((p) => p.major).map((p) => p.n),
     } : null,
     failures: failures(pass, ref, since, head, f),
     limit: approved && f?.head === head ? approvalLimit(f) : null,
@@ -689,7 +687,6 @@ async function advanceOne(db: Db, pass: Pass, writes: Writes, w0: ItemWorkflow):
     plannedFiles: fixed.plannedFiles,
     ...(beyond?.length ? { implementationBeyond: beyond } : {}),
     leg: ended,
-    thresholds: pass.thresholds,
   });
   if (found) {
     // A CI fix that failed twice names what fails and what it tried last.

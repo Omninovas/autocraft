@@ -26,10 +26,6 @@ const intIn = (raw: string | undefined, min: number, max: number, dflt: number):
   const n = Number(raw);
   return Number.isInteger(n) && n >= min && n <= max ? n : dflt;
 };
-const posInt = (raw: string | undefined, dflt: number): number => {
-  const n = Number(raw);
-  return raw !== undefined && Number.isInteger(n) && n > 0 ? n : dflt;
-};
 const jsonOf = (raw: string | undefined): unknown => {
   if (raw === undefined) return undefined;
   try { return JSON.parse(raw) as unknown; } catch { return undefined; }
@@ -72,7 +68,6 @@ export const SETTINGS = {
   outsideIssuesPerDay: reg("outside_issues_per_day", "int", 5, { owner: "intake" }, (r) => intIn(r, 0, Infinity, 5)),
   outsideSurgePerHour: reg("outside_surge_per_hour", "int", 30, { owner: "intake" }, (r) => intIn(r, 0, Infinity, 30)),
   singleMergeMax: reg("single_merge_max", "int", 3, { owner: "merge" }, (r) => intIn(r, 0, 100, 3)),
-  blockerOutsidePurposeMin: reg("blocker_outside_purpose_min", "int", 20, { owner: "workflow" }, (r) => posInt(r, 20)),
   reviewMinIntervalMinutes: reg("review_min_interval_minutes", "int", 120, { owner: "review" }, (r) => intIn(r, 0, 7 * 24 * 60, 120)),
   warmMinIntervalMinutes: reg("warm_min_interval_minutes", "int", 15, { owner: "build" }, (r) => intIn(r, 0, 24 * 60, 15)),
   warmRepos: reg<string[]>("warm_repos", "json", [], { owner: "build" }, (r) => strings(jsonOf(r ?? "[]")).sort()),

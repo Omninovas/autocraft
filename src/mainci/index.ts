@@ -19,15 +19,15 @@ import { warmPass } from "../build/warm-queue.ts";
 /** Branch prefix of the PRs AutoCraft opens to fix a red main; the merge queue does not hold them while main is red. */
 export const MAIN_FIX_BRANCH_PREFIX = "autocraft/main-ci-";
 
-/** Repos whose current default-branch head is red. */
-export async function redMainRepos(db: Db): Promise<Set<string>> {
-  return new Set([...await loadDecidingHeads(db, [])].filter(([, heads]) => currentHead(heads)?.cur.state === "red").map(([repo]) => repo));
+/** Repos whose default branch counts as red (derive()), also while its newest head's checks run after a red head. */
+export async function redMainRepos(db: Db, nowMs: number = Date.now()): Promise<Set<string>> {
+  return new Set([...await loadDecidingHeads(db, [])].filter(([, heads]) => currentHead(heads, nowMs)?.d.state === "red").map(([repo]) => repo));
 }
 
-/** The repo's current head among its stored ones, and what derive() says of them; null when they name none. */
-function currentHead<H extends MainHeadSummary>(heads: readonly H[]): { cur: H; d: NonNullable<ReturnType<typeof derive>> } | null {
-  const d = derive(heads.map((h): HeadRow => ({ sha: h.head_sha, state: h.state as MainCiState, committedAt: h.committed_at, headline: h.headline, firstSeenAt: h.first_seen_at, stateChangedAt: h.state_changed_at })));
-  return d ? { cur: heads.find((h) => h.head_sha === d.current.sha)!, d } : null;
+/** The repo's current head and the head its state comes from among its stored ones, and what derive() says of them; null when they name none. */
+function currentHead<H extends MainHeadSummary>(heads: readonly H[], nowMs: number): { cur: H; settled: H; d: NonNullable<ReturnType<typeof derive>> } | null {
+  const d = derive(heads.map((h): HeadRow => ({ sha: h.head_sha, state: h.state as MainCiState, committedAt: h.committed_at, headline: h.headline, firstSeenAt: h.first_seen_at, stateChangedAt: h.state_changed_at })), nowMs);
+  return d ? { cur: heads.find((h) => h.head_sha === d.current.sha)!, settled: heads.find((h) => h.head_sha === d.settled.sha)!, d } : null;
 }
 
 /** Least time between two polls. */
@@ -128,27 +128,34 @@ export async function pollMainCiIfDue(db: Db, client: Querier, now = Date.now())
   return true;
 }
 
+/**
+ * `state`: what the branch counts as (derive()); `headState`: the newest head's own state, which differs while that head's checks
+ * run after a red head. `failing` are the checks that failed at the head `state` comes from.
+ */
 export type MainCiRepoRow = {
-  repo: string; state: MainCiState; branch: string; headSha: string; headline: string | null; committedAt: string | null;
+  repo: string; state: MainCiState; headState: MainCiState; branch: string; headSha: string; headline: string | null; committedAt: string | null;
   failing: { name: string; url: string | null }[]; redSince: string | null; lastGreenSha: string | null; culprit: Culprit | null; updatedAt: string;
   /** What AutoCraft is doing about the red head (src/mainfix); null when nothing. */
   autocraft: string | null;
 };
 
 /** One entry per repo with stored heads, red first, then by name. `hidden` repos are left out. */
-export async function mainCiRepos(db: Db, hidden: HiddenRepos = []): Promise<MainCiRepoRow[]> {
+export async function mainCiRepos(db: Db, hidden: HiddenRepos = [], nowMs: number = Date.now()): Promise<MainCiRepoRow[]> {
   const by = await loadDecidingHeads(db, hidden);
   const out: MainCiRepoRow[] = [];
+  /** The head each row's state comes from: what AutoCraft does about a red branch is recorded at its red head. */
+  const from = new Map<string, MainHeadSummary>();
   for (const [repo, heads] of by) {
-    const at = currentHead(heads);
+    const at = currentHead(heads, nowMs);
     if (!at) continue;
-    const { cur, d } = at;
+    const { cur, settled, d } = at;
     let failing: { name: string; url: string | null }[] = [];
-    try { failing = JSON.parse(cur.failing) as typeof failing; } catch { /* malformed: none shown */ }
-    out.push({ repo, state: cur.state as MainCiState, branch: cur.branch, headSha: cur.head_sha, headline: cur.headline, committedAt: cur.committed_at, failing, redSince: d.redSince, lastGreenSha: d.lastGreenSha, culprit: d.culprit, updatedAt: cur.updated_at, autocraft: null });
+    try { failing = JSON.parse(settled.failing) as typeof failing; } catch { /* malformed: none shown */ }
+    from.set(repo, settled);
+    out.push({ repo, state: d.state, headState: cur.state as MainCiState, branch: cur.branch, headSha: cur.head_sha, headline: cur.headline, committedAt: cur.committed_at, failing, redSince: d.redSince, lastGreenSha: d.lastGreenSha, culprit: d.culprit, updatedAt: cur.updated_at, autocraft: null });
   }
-  const texts = await autocraftTexts(db, out.map((r) => ({ repo: r.repo, headSha: r.headSha, state: r.state })));
-  for (const r of out) r.autocraft = texts.get(`${r.repo}\0${r.headSha}`) ?? null;
+  const texts = await autocraftTexts(db, out.map((r) => ({ repo: r.repo, headSha: from.get(r.repo)!.head_sha, state: from.get(r.repo)!.state })));
+  for (const r of out) r.autocraft = texts.get(`${r.repo}\0${from.get(r.repo)!.head_sha}`) ?? null;
   const weight: Record<MainCiState, number> = { red: 0, optional: 1, running: 2, none: 3, green: 4 };
   return out.sort((a, b) => weight[a.state] - weight[b.state] || a.repo.localeCompare(b.repo));
 }
@@ -166,9 +173,9 @@ async function show(args: string[]): Promise<void> {
     else throw new Error(`unknown argument ${args[i]}\nusage: main-ci [--repo R]`);
   }
   const rows = (await mainCiRepos(await openDb())).filter((r) => !only || r.repo === only);
-  console.log(`${"repo".padEnd(28)} ${"state".padEnd(9)} ${"head".padEnd(9)} ${"red since".padEnd(21)} failing`);
+  console.log(`${"repo".padEnd(28)} ${"state".padEnd(12)} ${"head".padEnd(9)} ${"red since".padEnd(21)} failing`);
   for (const r of rows) {
-    console.log(`${r.repo.padEnd(28)} ${r.state.padEnd(9)} ${r.headSha.slice(0, 8).padEnd(9)} ${(r.redSince ?? "-").padEnd(21)} ${r.failing.map((f) => f.name).join(", ") || "-"}${r.culprit ? `  culprit ${r.culprit.sha.slice(0, 8)}${r.culprit.pr ? ` #${r.culprit.pr}` : ""}` : ""}`);
+    console.log(`${r.repo.padEnd(28)} ${(r.state === r.headState ? r.state : `${r.state}/${r.headState}`).padEnd(12)} ${r.headSha.slice(0, 8).padEnd(9)} ${(r.redSince ?? "-").padEnd(21)} ${r.failing.map((f) => f.name).join(", ") || "-"}${r.culprit ? `  culprit ${r.culprit.sha.slice(0, 8)}${r.culprit.pr ? ` #${r.culprit.pr}` : ""}` : ""}`);
   }
 }
 

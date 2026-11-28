@@ -93,7 +93,7 @@ export async function home(db: Db, req: Req): Promise<MaintainHome> {
   const viewer = req.user.role === "viewer";
   const [facts, ci] = await Promise.all([
     loadMaintainHome(db, { repos, hidden, staff, login: req.user.login }, { nowMs, withRunner: staff, health: healthOptions(), limits: { steps: LIMIT_STEPS, defaults: DEFAULT_PER_DAY } }),
-    mainCiRepos(db, hidden),
+    mainCiRepos(db, hidden, nowMs),
   ]);
   const live = new Set([...facts.rows, ...facts.attention.closesFailed].map((w) => w.repo));
   const may = viewer ? [] : await Promise.all([...live].map((r) => mayRunRepo(req.user, r)));

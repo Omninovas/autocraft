@@ -69,7 +69,7 @@ export async function health(db: Db, req: Req): Promise<Health> {
   const nowMs = Date.now();
   const [facts, ci, steps] = await Promise.all([
     loadAttention(db, { hidden }, { nowMs, health: healthOptions(), limits: { steps: LIMIT_STEPS, defaults: DEFAULT_PER_DAY } }),
-    mainCiRepos(db, hidden), loadSteps(),
+    mainCiRepos(db, hidden, nowMs), loadSteps(),
   ]);
   const { state, problems } = await healthProblems(db, { hidden, staff, nowMs, facts, ci });
   for (const trip of facts.stops.trips) {

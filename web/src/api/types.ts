@@ -441,14 +441,17 @@ export type MainCiState = "green" | "red" | "optional" | "running" | "none";
 export type MainCiSummary = Record<MainCiState, number>;
 export interface MainCiRepo {
   repo: RepoName;
+  /** What the branch counts as: red also while the newest head's checks run after a red head. */
   state: MainCiState;
+  /** The newest head's own state. */
+  headState: MainCiState;
   branch: string;
   headSha: string;
   headline: string | null;
   committedAt: string | null;
-  /** The checks that failed at the head; url is the run's page. */
+  /** The checks that failed at the head `state` comes from; url is the run's page. */
   failing: { name: string; url: string | null }[];
-  /** When the culprit head turned red; null unless the head is red. */
+  /** When the culprit head turned red; null unless the branch is red. */
   redSince: string | null;
   lastGreenSha: string | null;
   /** The first red head after the last green one, with the PR its message names. */

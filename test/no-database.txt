@@ -35,7 +35,6 @@ jev-cloudflare.test.ts
 kube-exec.test.ts
 lock.test.ts
 lockfile-and-links.test.ts
-main-ci.test.ts
 main-qualified-writes.test.ts
 maintain-items.test.ts
 markdown-html.test.ts

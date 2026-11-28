@@ -135,15 +135,15 @@ type Current = { headSha: string; branch: string; state: string; culprit: string
 /** The head's CI ended. */
 const known = (c: Current): boolean => c.state === "red" || c.state === "green" || c.state === "optional";
 
-/** The default branch's head of each of `repos` that has one read. */
+/** The default branch's head of each of `repos` that has one read, in its own state: a fix works on the head whose checks failed. */
 async function currentHeads(db: Db, repos: readonly string[]): Promise<Map<string, Current>> {
   const wanted = new Set(repos);
-  const heads = (await mainCiRepos(db)).filter((x) => wanted.has(x.repo));
+  const heads = (await mainCiRepos(db)).filter((x) => wanted.has(x.repo)).map((r) => (r.headState === "red" ? r : { ...r, redSince: null, culprit: null }));
   const at = await loadMainCiAt(db, heads.flatMap((r) => [r.headSha, ...(r.culprit && r.culprit.sha !== r.headSha ? [r.culprit.sha] : [])].map((sha) => ({ repo: r.repo, sha }))));
   return new Map(heads.map((r) => {
     const stateChangedAt = at.get(`${r.repo}@${r.headSha}`)?.state_changed_at ?? "";
     const culprit = r.culprit?.sha ?? r.headSha;
-    return [r.repo, { headSha: r.headSha, branch: r.branch, state: r.state, culprit, culpritPr: r.culprit?.pr ?? null, redSince: r.redSince ?? stateChangedAt, culpritAt: at.get(`${r.repo}@${culprit}`)?.first_seen_at ?? "", stateChangedAt }];
+    return [r.repo, { headSha: r.headSha, branch: r.branch, state: r.headState, culprit, culpritPr: r.culprit?.pr ?? null, redSince: r.redSince ?? stateChangedAt, culpritAt: at.get(`${r.repo}@${culprit}`)?.first_seen_at ?? "", stateChangedAt }];
   }));
 }
 

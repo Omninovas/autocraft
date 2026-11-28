@@ -569,7 +569,7 @@ export async function runBatches(db: Db, params: BatchParams, log: (line: string
     if (!ch) { s.waiting.push(b.branch); return; }
     if (ch.state === "MERGED") return await bookLanded(b, members, q);
     // Main is red: the batch keeps its checks but does not merge until main is green. Main-fix PRs never join a batch (a plan merge action with singleOnly).
-    if ((await redMainRepos(db)).has(repo)) {
+    if ((await redMainRepos(db, d.now().getTime())).has(repo)) {
       log(`  ${b.branch}: main CI is red in ${repo}; not merged`);
       s.waiting.push(b.branch);
       return;

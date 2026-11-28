@@ -55,8 +55,9 @@ export async function loadMainCi(db: Db, o: { repos?: string[]; hiddenOk?: Hidde
 }
 
 /**
- * The heads that decide what a repo's history says (mainci/classify.ts `derive`), oldest first per tracked repo: the newest, the last green
- * one and the first red one after it. Only the newest carries its failing checks.
+ * The heads that decide what a repo's history says (mainci/classify.ts `derive`), oldest first per tracked repo: the newest, the
+ * newest settled one (red, green or optional), the last green one, the last green or optional one and the first red one after it.
+ * Only the newest and the newest settled carry their failing checks.
  */
 export async function loadDecidingHeads(db: Db, hidden: HiddenRepos): Promise<Map<string, MainHeadSummary[]>> {
   const out = new Map<string, MainHeadSummary[]>();
@@ -64,12 +65,14 @@ export async function loadDecidingHeads(db: Db, hidden: HiddenRepos): Promise<Ma
   const newestFirst = q.k.selectFrom("main.main_ci as m").select([...SUMMARY, (eb) => eb.fn.agg<number>("row_number").over((o) => o.partitionBy("m.repo")
     .orderBy(eb.fn.coalesce("m.committed_at", "m.first_seen_at"), "desc").orderBy("m.first_seen_at", "desc").orderBy("m.head_sha", "desc")).as("rn")])
     .where((eb) => trackedRepo(eb, "m.repo")).where(hiddenRepos(db, "m.repo", hidden));
-  const green = q.k.selectFrom(newestFirst.as("h")).selectAll("h")
-    .select((eb) => eb.fn.min<number | null>(eb.case().when("h.state", "=", "green").then(eb.ref("h.rn")).end()).over((o) => o.partitionBy("h.repo")).as("green_rn"));
-  const red = q.k.selectFrom(green.as("g")).selectAll("g")
-    .select((eb) => eb.fn.max<number | null>(eb.case().when(eb.and([eb("g.state", "=", "red"), eb.or([eb("g.green_rn", "is", null), eb("g.rn", "<", eb.ref("g.green_rn"))])])).then(eb.ref("g.rn")).end()).over((o) => o.partitionBy("g.repo")).as("red_rn"));
-  const rows = await q.all(q.k.selectFrom(red.as("m")).select([...SUMMARY.filter((c) => c !== "m.failing"), (eb) => eb.case().when("m.rn", "=", 1).then(eb.ref("m.failing")).else("[]").end().as("failing")])
-    .where((eb) => eb.or([eb("m.rn", "=", 1), eb("m.rn", "=", eb.ref("m.green_rn")), eb("m.rn", "=", eb.ref("m.red_rn"))]))
+  const marks = q.k.selectFrom(newestFirst.as("h")).selectAll("h")
+    .select((eb) => eb.fn.min<number | null>(eb.case().when("h.state", "=", "green").then(eb.ref("h.rn")).end()).over((o) => o.partitionBy("h.repo")).as("green_rn"))
+    .select((eb) => eb.fn.min<number | null>(eb.case().when("h.state", "in", ["green", "optional"]).then(eb.ref("h.rn")).end()).over((o) => o.partitionBy("h.repo")).as("ok_rn"))
+    .select((eb) => eb.fn.min<number | null>(eb.case().when("h.state", "in", ["red", "green", "optional"]).then(eb.ref("h.rn")).end()).over((o) => o.partitionBy("h.repo")).as("settled_rn"));
+  const red = q.k.selectFrom(marks.as("g")).selectAll("g")
+    .select((eb) => eb.fn.max<number | null>(eb.case().when(eb.and([eb("g.state", "=", "red"), eb.or([eb("g.ok_rn", "is", null), eb("g.rn", "<", eb.ref("g.ok_rn"))])])).then(eb.ref("g.rn")).end()).over((o) => o.partitionBy("g.repo")).as("red_rn"));
+  const rows = await q.all(q.k.selectFrom(red.as("m")).select([...SUMMARY.filter((c) => c !== "m.failing"), (eb) => eb.case().when(eb.or([eb("m.rn", "=", 1), eb("m.rn", "=", eb.ref("m.settled_rn"))])).then(eb.ref("m.failing")).else("[]").end().as("failing")])
+    .where((eb) => eb.or([eb("m.rn", "=", 1), eb("m.rn", "=", eb.ref("m.settled_rn")), eb("m.rn", "=", eb.ref("m.green_rn")), eb("m.rn", "=", eb.ref("m.ok_rn")), eb("m.rn", "=", eb.ref("m.red_rn"))]))
     .orderBy("m.repo").orderBy("m.rn", "desc"));
   for (const r of rows) (out.get(r.repo) ?? out.set(r.repo, []).get(r.repo)!).push(r as MainHeadSummary);
   return out;

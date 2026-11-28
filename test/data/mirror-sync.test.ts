@@ -149,21 +149,24 @@ const head = (repo: string, sha: string, state: string, at: string) => ({ repo, 
 
 both("main CI: the deciding heads say the same as every stored head", async (db) => {
   const q = queryDb(db);
-  const histories = ["r", "g", "gr", "rgrr", "grgyrr", "grrg", "ygrryr", "rr", "grry", "y"];
+  // x and z: a head whose checks are rerun after it was red (x) or green (z).
+  const histories = ["r", "g", "gr", "rgrr", "grgyrr", "grrg", "ygrryr", "rr", "grry", "gorry", "grox", "gxy", "rzy", "gorxy", "y"];
   await q.run(q.k.insertInto("main.tracked_repos").values(histories.map((name) => ({ name }))));
-  const STATES: Record<string, string> = { r: "red", g: "green", y: "running" };
+  const STATES: Record<string, string> = { r: "red", g: "green", o: "optional", y: "running", x: "running", z: "running" };
+  const SETTLED: Record<string, string> = { r: "red", g: "green", o: "optional", x: "red", z: "green" };
   for (const h of histories) {
     // Two heads of one time are ordered by when they were first seen, then by sha; a head without a commit time counts from when it was seen.
     await q.run(q.k.insertInto("main.main_ci").values([...h].map((c, i) => ({
-      repo: h, head_sha: `s${i}`, branch: "main", state: STATES[c]!, failing: "[]", checks: "[]", headline: `#${i}`, committed_at: i % 3 === 2 ? null : `2026-01-0${1 + Math.floor(i / 2)}T00:00:00Z`,
+      repo: h, head_sha: `s${i}`, branch: "main", state: STATES[c]!, settled_state: SETTLED[c] ?? null, failing: "[]", checks: "[]", headline: `#${i}`, committed_at: i % 3 === 2 ? null : `2026-01-0${1 + Math.floor(i / 2)}T00:00:00Z`,
       first_seen_at: `2026-01-0${1 + Math.floor(i / 2)}T00:00:00Z`, state_changed_at: `c${i}`, updated_at: T0,
     }))));
   }
-  const of = (rows: MainHeadSummary[]) => derive(rows.map((x) => ({ sha: x.head_sha, state: x.state as MainCiState, committedAt: x.committed_at, headline: x.headline, firstSeenAt: x.first_seen_at, stateChangedAt: x.state_changed_at })));
+  const of = (rows: MainHeadSummary[]) => derive(rows.map((x) => ({ sha: x.head_sha, state: x.state as MainCiState, settledState: x.settled_state as MainCiState | null, committedAt: x.committed_at, headline: x.headline, firstSeenAt: x.first_seen_at, stateChangedAt: x.state_changed_at })));
   const all = await loadMainCi(db), few = await loadDecidingHeads(db, ["y"]);
   for (const h of histories.slice(0, -1)) {
     assert.deepEqual(of(few.get(h)!), of(all.get(h)!), h);
-    assert.ok(few.get(h)!.length <= 3);
+    // At most the newest, the newest settled, the last green, the last green or optional, and the first red after that one.
+    assert.ok(few.get(h)!.length <= 5);
   }
   assert.equal(few.has("y"), false);
 });

@@ -98,9 +98,9 @@ export async function home(db: Db, req: Req): Promise<MaintainHome> {
   const live = new Set([...facts.rows, ...facts.attention.closesFailed].map((w) => w.repo));
   const may = viewer ? [] : await Promise.all([...live].map((r) => mayRunRepo(req.user, r)));
   const acting = new Set([...live].filter((_, i) => may[i]));
-  const stops = await stoppedRows(facts.attention.stops, hidden);
+  const stops = await stoppedRows(db, facts.attention.stops, hidden, req.user);
   const [attention, runner] = await Promise.all([
-    problems(db, { hidden, staff, nowMs, ci, stops, facts: facts.attention, acting }),
+    problems(db, { hidden, staff, nowMs, ci, stops, facts: facts.attention, acting, operator: req.user.role === "operator" }),
     Promise.resolve(facts.runner ? runnerLine(facts.runner, req.user.login) : null),
   ]);
   if (viewer) {

@@ -6,6 +6,7 @@ import { connectDb } from "./helpers/raw-db.ts";
 import { addEvent, insertWorkflow } from "../src/workflow/store.ts";
 import { recordMessage } from "../src/data/chat/index.ts";
 import { RULE_STARTER } from "../src/workflow/types.ts";
+import { tripStage } from "../src/data/control/index.ts";
 
 const T = "2026-11-01T00:00:00.000Z";
 const as = (role: string, writable: string[]) => ({
@@ -93,4 +94,17 @@ test("a close that was not made is a problem for those who act on the repo, unti
   assert.deepEqual(await listed("maintainer", []), []);
   await insertWorkflow(db, { ...wf, number: 1, state: "running" });
   assert.deepEqual(await listed("maintainer", ["app"]), []);
+});
+
+test("a breaker's Needs attention row opens the item its evidence names and offers Resume only to those who may resume it", async () => {
+  const db = await connectDb(":memory:");
+  await db.run(db.k.insertInto("repos").values({ name: "app", visibility: "public" }));
+  await db.run(db.k.insertInto("tracked_repos").values({ name: "app", added_by: "op", added_at: T, pipeline: 1 }));
+  await tripStage(db, [{ key: "merge:app", reason: "the post-merge review of app#9 found 1 defect", evidence: ["app#9"], at: T }]);
+  const rowOf = async (writable: string[]) => (await home(db, as("maintainer", writable))).attention.find((p) => p.kind === "stopped")!;
+  const writer = await rowOf(["app"]);
+  assert.match(writer.to, /items:app\/9/);
+  assert.match(writer.to, /open=app\/9/);
+  assert.deepEqual(writer.action, { kind: "resume-breaker", key: "merge:app" });
+  assert.equal((await rowOf([])).action, undefined);
 });

@@ -75,7 +75,6 @@ import type {
   Item,
   OverrideInput,
   MainCi,
-  StuckItems,
   Progress,
   PromptsReport,
   BatchDetail,
@@ -214,7 +213,6 @@ export interface Api {
   findingPage(repo: RepoName, number: number): Promise<FindingPageData>;
   /** CI on the default branch of every synced repo the viewer may see. */
   mainCi(): Promise<MainCi>;
-  stuckItems(): Promise<StuckItems>;
   /** Anyone signed in reads; writes and the preview are for operators. Override notes come only to operators. */
   contributors: {
     list(filter: ContributorFilter): Promise<ContributorList>;

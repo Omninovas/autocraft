@@ -4,6 +4,9 @@ import type { Health, HealthProblem } from "../../../web/src/api/types.ts";
 import { jevEnabled, jevOutage } from "../../agents/jev.ts";
 import { tripOf } from "../../core/push-outcome.ts";
 import { blankIfHidden } from "../../data/control/index.ts";
+import type { TripRow } from "../../data/control/types.ts";
+import { OUTSIDE_SURGE } from "../../data/intake/types.ts";
+import { itemsListPath, itemsPath } from "../../../web/src/lib/links.ts";
 import { loadAttention } from "../../data/views/attention.ts";
 import type { AttentionFacts } from "../../data/views/types.ts";
 import { checksOf, healthOptions } from "../../health-checks.ts";
@@ -19,6 +22,16 @@ import { canSeeInternals } from "./staff.ts";
 import { stepTitle } from "./trace.ts";
 import { hiddenRepos } from "./visible.ts";
 import type { Db } from "../../db/index.ts";
+
+/** Where a tripped breaker's row goes: the items its evidence names (`photocraft#12`, `photocraft#12@1a2b3c4d`, `photocraft#12 attempt 2`; one opens beside the Items list), the held outside items for the surge breaker, else the Work queue. */
+export function tripTarget(trip: Pick<TripRow, "stage" | "evidence">, hidden: HiddenRepos): string {
+  const items = new Map<string, { repo: string; number: number }>();
+  for (const e of trip.evidence) {
+    const m = /^([\w.-]+(?:\/[\w.-]+)?)#([1-9]\d*)\b/.exec(e);
+    if (m && !isHiddenRepo(hidden, m[1]!)) items.set(`${m[1]}#${m[2]}`, { repo: m[1]!, number: Number(m[2]) });
+  }
+  return items.size ? itemsListPath([...items.values()]) : trip.stage === OUTSIDE_SURGE ? itemsPath("is:outside-held") : "/queue";
+}
 
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
@@ -77,7 +90,7 @@ export async function health(db: Db, req: Req): Promise<Health> {
     const k = tripOf(trip.stage);
     if (k?.repo && isHiddenRepo(hidden, k.repo)) continue;
     const why = blankIfHidden(trip.reason, hidden);
-    problems.push({ id: `breaker:${trip.stage}`, area: "breaker", tone: "bad", text: `${stepTitle(k?.stage ?? trip.stage)}${k ? (k.repo ? ` in ${k.repo}` : " on every repo") : ""} is stopped by its breaker${why ? `: ${clip(why, 120)}` : ""}`, to: "/queue", since: trip.trippedAt });
+    problems.push({ id: `breaker:${trip.stage}`, area: "breaker", tone: "bad", text: `${stepTitle(k?.stage ?? trip.stage)}${k ? (k.repo ? ` in ${k.repo}` : " on every repo") : ""} is stopped by its breaker${why ? `: ${clip(why, 120)}` : ""}`, to: tripTarget(trip, hidden), since: trip.trippedAt });
   }
   for (const l of facts.stops.zeroLimits) problems.push({ id: `limit:${l.step}`, area: "limit", tone: "warn", text: `${steps.get(l.step)?.title ?? l.step} is paused (limit 0 a day)`, to: "/pipeline", since: null });
   // The signed-in person's own stored token can no longer be refreshed, so merges and closes they approve cannot run as them.

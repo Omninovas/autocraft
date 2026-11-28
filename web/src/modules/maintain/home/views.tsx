@@ -3,10 +3,14 @@
 import { Link } from "react-router-dom";
 import { CaretRightIcon, WarningCircleIcon, XCircleIcon } from "@phosphor-icons/react";
 import { t } from "../../../../../src/i18n/index.ts";
-import { useQuery } from "../../../api/client";
-import type { HomeProblem, MaintainRow, MaintainRunnerLine } from "../../../api/types";
+import { useApi, useQuery } from "../../../api/client";
+import type { HomeAction, HomeProblem, MaintainRow, MaintainRunnerLine } from "../../../api/types";
 import { useUser } from "../../../shell/UserContext";
 import { Pending } from "../../../ui/atoms/Pending";
+import { Button } from "../../../ui/atoms/Button";
+import { ErrorLine } from "../../../ui/atoms/ErrorLine";
+import { ConfirmButton } from "../../../ui/molecules/ConfirmButton";
+import { useWrite } from "../../../lib/hooks";
 import { messageTime } from "../../../lib/format";
 import { cn } from "../../../ui/cn";
 import { ItemRef } from "../../../ui/molecules/ItemRef";
@@ -104,7 +108,34 @@ function List({ title, rows }: { title: string; rows: MaintainRow[] }) {
   );
 }
 
-/** Problems: stopped steps, failing checks, fixes that gave up. Shown only when there are some. */
+/** The row's action, through the same registered control or endpoint its page uses; the reply line shows when it refuses. */
+function ProblemAction({ a }: { a: HomeAction }) {
+  const api = useApi();
+  const write = useWrite();
+  const run = () => void write.run("go", async () => {
+    switch (a.kind) {
+      case "resume-breaker": {
+        const r = await api.controls.run({ control: "resume-breaker", key: a.key });
+        if (!r.ok) throw new Error(r.line);
+        return;
+      }
+      case "release-author": return api.pipeline.releaseAuthor(a.author);
+      case "ack-deadline": return api.pipeline.ackDeadline(a.step);
+      default: return api.githubApp.ackForeignInstalls();
+    }
+  });
+  const busy = write.busy === "go";
+  return (
+    <div className="relative z-10 flex shrink-0 flex-col items-end gap-1">
+      {a.kind === "release-author"
+        ? <ConfirmButton idle="secondary" label={t("Release")} confirmLabel={t("Release for {author}", { author: a.author })} loading={busy} onConfirm={run} />
+        : <Button size="sm" loading={busy} onClick={run} className="max-md:h-11">{a.kind === "resume-breaker" ? t("Resume") : t("Acknowledge")}</Button>}
+      <ErrorLine error={write.error} className="max-w-[16rem] text-right text-2xs" />
+    </div>
+  );
+}
+
+/** Problems: stopped steps, held authors, failing checks, fixes that gave up. Each opens what it names; its action sits beside it. */
 function Attention({ rows }: { rows: HomeProblem[] }) {
   if (!rows.length) return null;
   const title = t("Needs attention");
@@ -123,7 +154,7 @@ function Attention({ rows }: { rows: HomeProblem[] }) {
               </Link>
               {p.detail && <div className="mt-0.5 text-xs text-ink/70">{p.detail}</div>}
             </div>
-            <CaretRightIcon aria-hidden className="mt-1 shrink-0 text-ink/50" />
+            {p.action ? <ProblemAction a={p.action} /> : <CaretRightIcon aria-hidden className="mt-1 shrink-0 text-ink/50" />}
           </li>
         ))}
       </ul>

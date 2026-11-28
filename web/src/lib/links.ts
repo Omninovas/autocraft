@@ -18,6 +18,16 @@ export const githubItemUrl = (repo: string, number: number, kind?: ItemKind | nu
 /** `/items/<repo>/<n>`; the repo is the short name the dashboard shows. */
 export const itemPath = (repo: string, number: number): string => `/items/${encodeURIComponent(shortRepo(repo))}/${number}`;
 
+const readableQuery = (q: string): string => encodeURIComponent(q).replace(/%3A/gi, ":").replace(/%2C/gi, ",").replace(/%2F/gi, "/").replace(/%20/g, "+");
+
+/** The Items list of a query, `/items?q=is:outside-held+author:eve`; `open` shows that item beside the list. */
+export const itemsPath = (q: string, open?: { repo: string; number: number }): string =>
+  `/items?q=${readableQuery(q)}${open ? `&open=${encodeURIComponent(shortRepo(open.repo))}/${open.number}` : ""}`;
+
+/** The Items list of exactly these items; a single one also opens beside the list. */
+export const itemsListPath = (items: readonly { repo: string; number: number }[]): string =>
+  itemsPath(`items:${items.map((i) => `${shortRepo(i.repo)}/${i.number}`).join(",")}`, items.length === 1 ? items[0] : undefined);
+
 /** `/batches/<id>`: the detail page of an integration batch. */
 export const batchPath = (id: number): string => `/batches/${id}`;
 

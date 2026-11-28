@@ -145,7 +145,6 @@ export function createHttpApi(): Api {
     securityList: () => get("/api/security/findings"),
     findingPage: (repo, number) => get(`/api/security/findings/${encodeURIComponent(repo)}/${number}/page`),
     mainCi: () => get("/api/main-ci"),
-    stuckItems: () => get("/api/stuck"),
     contributors: {
       list: (filter) => get(`/api/contributors${qs(filter)}`),
       previewRule: (rule) => get(`/api/contributors/rule-preview${qs(rule)}`),

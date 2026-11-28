@@ -388,7 +388,7 @@ const KEY_LABEL: Partial<Record<QueryKey, string>> = {
 const VALUE_LABEL: Record<string, string> = { issue: "Issues", pr: "Pull requests", open: "Open", closed: "Closed", merged: "Merged", green: "passed", red: "failed", pending: "running" };
 const FLAG_LABEL: Record<string, string> = {
   draft: "Drafts", ready: "Ready pull requests", outside: "Outside authors", mine: "Mine", asked: "Asks me", approved: "Approved for merge", duplicate: "Duplicates",
-  security: "Security", stuck: "Stuck", "outside-held": "Held outside authors",
+  security: "Security", stuck: "Stuck", stale: "Unchanged for days", "outside-held": "Held outside authors",
 };
 const HAS_LABEL: Record<string, string> = { pr: "linked item", label: "label", priority: "priority", area: "area", kind: "classification", discord: "Discord mention", response: "maintainer reply" };
 

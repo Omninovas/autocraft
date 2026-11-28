@@ -39,7 +39,7 @@ const MAIN: Page[] = [
   { to: "/items", label: tk("Items"), icon: ListBulletsIcon },
   { to: "/queue", label: tk("Work queue"), icon: QueueIcon, also: ["/next", "/batches"] },
   { to: "/agents", label: tk("Agents"), icon: RobotIcon },
-  { to: "/stats", label: tk("Stats"), icon: ChartLineUpIcon, also: ["/progress", "/activity", "/cost", "/downloads", "/rates", "/classifiers", "/main-ci", "/nightly", "/stuck"] },
+  { to: "/stats", label: tk("Stats"), icon: ChartLineUpIcon, also: ["/activity", "/main-ci"] },
 ];
 const RUNNER: Page = { to: "/runner", label: tk("Runner"), icon: CpuIcon, also: ["/connect"] };
 const REFERENCE: Page[] = [
@@ -47,17 +47,18 @@ const REFERENCE: Page[] = [
   { to: "/envs", label: tk("Environments"), also: ["/workspaces"] },
   { to: "/repos", label: tk("Repos") },
   { to: "/scans", label: tk("Scans"), also: ["/security"] },
+  { to: "/audit", label: tk("Audit log") },
 ];
 const ADMIN: Page[] = [
-  { to: "/admin/users", label: tk("Users and access"), also: ["/access", "/contributors"] },
+  { to: "/admin/users", label: tk("Users and access"), also: ["/contributors"] },
   { to: "/admin/health", label: tk("Health") },
-  { to: "/admin/sweeps", label: tk("Sweeps"), also: ["/nightly"] },
+  { to: "/admin/sweeps", label: tk("Sweeps") },
   { to: "/admin/settings", label: tk("Instance settings"), also: ["/pipeline"] },
-  { to: "/admin/inference", label: tk("Inference"), also: ["/inference"] },
+  { to: "/admin/inference", label: tk("Inference") },
+  { to: "/admin/storage", label: tk("Storage") },
   { to: "/admin/github-app", label: tk("GitHub App") },
   { to: "/admin/discord", label: tk("Discord") },
   { to: "/admin/limits", label: tk("Limits") },
-  { to: "/admin/audit", label: tk("Audit log"), also: ["/audit"] },
 ];
 const HELP: Page = { to: "/help", label: tk("Help"), icon: QuestionIcon };
 
@@ -265,7 +266,6 @@ export function AppShell() {
     "g i": () => navigate("/items"),
     "g q": () => navigate("/queue"),
     "g s": () => navigate("/stats"),
-    "g p": () => navigate("/progress"),
   });
 
   const content = (

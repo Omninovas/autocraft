@@ -2,6 +2,7 @@
 // Every check reads rows the runner, the sync and the build workers already write; none starts work or wakes the planner.
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { stepTitle } from "./dash/api/trace.ts";
+import { itemsListPath, itemsPath } from "../web/src/lib/links.ts";
 import { slugOf } from "./owners.ts";
 import { coverageSnapshot, githubIdentity } from "./github/identity.ts";
 import { readAppSecrets } from "./github/install-token.ts";
@@ -245,7 +246,8 @@ async function deadlineChecks({ f }: CheckCtx): Promise<Check[]> {
 async function workflowChecks({ f }: CheckCtx): Promise<Check[]> {
   if (!f.workflowFailures.length) return [ok("workflows", "/pipeline", { group: "workflows" })];
   return f.workflowFailures.map((w) => ({
-    id: `workflow:${w.ref}`, state: "warn", group: "workflows", repo: w.ref.slice(0, w.ref.lastIndexOf("#")), since: w.since, to: "/pipeline",
+    id: `workflow:${w.ref}`, state: "warn", group: "workflows", repo: w.ref.slice(0, w.ref.lastIndexOf("#")), since: w.since,
+    to: itemsListPath([{ repo: w.ref.slice(0, w.ref.lastIndexOf("#")), number: Number(w.ref.slice(w.ref.lastIndexOf("#") + 1)) }]),
     text: `The workflow of ${w.ref} cannot be checked: ${clip(w.error, 200)}`, brief: "An item's workflow cannot be checked",
   }) satisfies Check);
 }
@@ -306,14 +308,14 @@ async function stepStalledChecks({ nowMs, f }: CheckCtx): Promise<Check[]> {
 /** Open items that nothing will move and nobody is asked about (fail), or that have not changed for days (warn). Read from the result the runner stores after planner passes. */
 async function livenessCheck({ f }: CheckCtx): Promise<Check[]> {
   const l = f.liveness;
-  if (!l || (l.stuck === 0 && l.long === 0)) return [ok("liveness", "/stuck", { of: l?.open })];
+  if (!l || (l.stuck === 0 && l.long === 0)) return [ok("liveness", itemsPath("is:stuck"), { of: l?.open })];
   const oldest = (v: string) => l.items.filter((i) => i.verdict === v).map((i) => i.since).sort()[0] ?? null;
   if (l.stuck > 0) {
     const text = `${l.stuck} open item${l.stuck === 1 ? " is" : "s are"} stuck: nothing is due and nobody is asked${l.long ? `; ${l.long} more unchanged for days` : ""}`;
-    return [{ id: "liveness", state: "fail", text, brief: "Some items are stuck", since: oldest("stuck"), count: l.stuck, of: l.open, to: "/stuck" }];
+    return [{ id: "liveness", state: "fail", text, brief: "Some items are stuck", since: oldest("stuck"), count: l.stuck, of: l.open, to: itemsPath("is:stuck") }];
   }
   const text = `${l.long} open item${l.long === 1 ? " has" : "s have"} not changed for days`;
-  return [{ id: "liveness", state: "warn", text, brief: "Some items have not moved for days", since: oldest("long"), count: l.long, of: l.open, to: "/stuck" }];
+  return [{ id: "liveness", state: "warn", text, brief: "Some items have not moved for days", since: oldest("long"), count: l.long, of: l.open, to: itemsPath("is:stale") }];
 }
 
 /** Under the GitHub App identity: the app's keys must be readable (fail), and every tracked repo should be in its installation (warn). Nothing is listed under the box account. */

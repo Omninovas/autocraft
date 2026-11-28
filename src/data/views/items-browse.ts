@@ -192,6 +192,7 @@ function termExpr(db: Db, eb: kx.AnyEb, scope: BrowseScope, t: QueryTerm): Expre
         case "duplicate": return eb("x.duplicate", "=", 1);
         case "outside-held": return heldExpr(eb, "x.repo", "x.number");
         case "stuck": return stuckItem(eb, "x");
+        case "stale": return stuckItem(eb, "x", "long");
         default: return eb.and([hasSecurityVerdict(db, eb, "x.repo", "x.number"), eb.not(quietPrExpr(eb, "x.repo", "x.number"))]);
       }
     }));

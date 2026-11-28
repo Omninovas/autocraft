@@ -67,6 +67,11 @@ const REDIRECTS: [path: string, element: ReactElement][] = [
   ["flow", <RedirectTo to="/help/workflows" search="" />],
   ["about/*", <RedirectTo to="/help" search="" />],
   ["reports", <RedirectTo to="/stats" search="" />],
+  ["stuck", <RedirectTo to="/items" search="?q=is:stuck" />],
+  ...["progress", "cost", "classifiers", "rates", "downloads", "nightly"].map((p): [string, ReactElement] => [p, <RedirectTo to="/stats" search="" />]),
+  ["inference", <RedirectTo to="/admin/inference" search="" />],
+  ["access", <RedirectTo to="/admin/users" search="" />],
+  ["admin/audit", <RedirectTo to="/audit" />],
   ["settings", <SettingsRedirect operator="/admin" />],
   ["accounts", <SettingsRedirect operator="/admin/inference" />],
 ];

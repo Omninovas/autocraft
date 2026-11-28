@@ -61,7 +61,6 @@ import { mergedAsApproved, postmergeOf } from "./postmerge.ts";
 import * as nightly from "./nightly.ts";
 import { canSeeInternals } from "./staff.ts";
 import * as operator from "./operator.ts";
-import * as stuck from "./stuck.ts";
 import { actionsOf as releasesOf } from "../../operator-actions.ts";
 import { settle, unflagged } from "../../classify/settled.ts";
 import { classifyRun, loadItemAreas, loadSettled } from "../../data/triage/index.ts";
@@ -431,7 +430,6 @@ export function apiRoutes(opts: ApiOptions = {}): Route[] {
       const repos = await mainCiRepos(db, await hiddenRepos(db, req));
       return { summary: summarize(repos), repos };
     }),
-    get("/api/stuck", stuck.stuckItems),
     get("/api/main-ci/summary", async (db, req) => summarize(await mainCiRepos(db, await hiddenRepos(db, req)))),
     heavy(get("/api/contributors", adm.listContributors)),
     heavy(get("/api/contributors/rule-preview", adm.previewRule)),

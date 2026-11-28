@@ -53,6 +53,18 @@ Done counts and trends start at `settings.tracking_started_at`, set when the dat
 ### Home (`/`)
 
 - One line says how many Task Runners are connected and how many others are available. Below it: problems, then the reader's own items (started, approved, held, answered or written about) with each conversation's last message; viewers see the recently updated items instead. With a project picked, it shows that repo only, and the repo's page (`/repo/<name>`) also shows its areas: each with its description and open items (linking to the Items list filtered to it), the open items without an area, the model's open proposals and the list's version history. Whoever runs the repo adds, renames, describes and removes areas.
+- **Needs attention** lists the problems, each opening what it names, with its action beside it for readers allowed to run it:
+
+| Row | Opens | Action |
+|---|---|---|
+| A step stopped by its breaker ("Merge queued pull requests in texturecraft", with the reason) | The items the breaker's evidence names in Items (`items:` term); one item opens beside the list (`open=`), so a post-merge review's defect shows in its chat. The outside-surge breaker opens `is:outside-held`; a trip that names no item, the Work queue | Resume, for an operator, or a maintainer with write access to the breaker's repo (instance-wide breakers: operators) |
+| An outside author held at the daily limit or by the surge | Items, `is:outside-held author:<login>` | Release (operators): lets every held item of the author through |
+| A step at a daily limit of 0, the pipeline switch, runner, sync, worker and other instance checks | The page that holds the setting or the cause | none |
+| A job stopped for running past its step's limit | The job | Acknowledge (operators) |
+| The GitHub App installed on an account that may not use it | GitHub App settings | Acknowledge (operators) |
+| Open items stuck (nothing is due and nobody is asked), or unchanged for days | Items, `is:stuck` or `is:stale` | none |
+| An item whose workflow cannot be checked, whose CI fix gave up, or that was not closed | The item beside the Items list | none: the item's chat takes the command |
+| A security finding whose fix gave up | The finding | none |
 
 - The Live board (`GET /api/live`) puts every running and queued unit of work in the project on one time axis over the last hour: a job with its model calls and build steps inside it, a model call or build task of its own, and each open integration batch with the build of its combined tree. A running lane shows how long it has run and, from earlier runs of the same step, the expected rest (dashed, the median) and a red mark where 90% of them were done. Up to six queued jobs follow; housekeeping steps show only when they fail. Jobs that ended in the last 20 minutes stay on it, faded. Lanes keep the order in which they first appeared: a lane that starts or ends stays in its place, and a lane the server stops sending stays as ended until the reader comes back to the tab or loads the page again. Model calls name their account for operators only.
 - Operators and maintainers can switch the Live board from **By job** to **By worker** (`?live=workers`; viewers get no worker data). It gives one row per worker that does model calls: each person's Task Runner (with their own tokens) that has a fresh status or ran a call in the last hour, each enabled box account (operators only, as a call's account is), and Jev when it ran. A shared runner's row names its label, owner and harness, says whether it takes calls (with the reason when it does not), how many calls it runs of its slots and the models it offers; a label that is the machine's hostname shows as "Task Runner", and no hostname is ever sent. A user who turns on **Private on the Live board** (My settings) has their runners' calls shown to others on one "Private Task Runner" row, with no login, label, slots or models; they see their own runners as usual. Each track shows the calls the worker ran in the last hour on the same time axis, coloured by the step's group (review and verify, fixes, triage, security, other; the legend names the groups present) and marked with the item's number where the bar has room; a running call pulses and shows its expected rest, a failed one is red. A track is one tab stop; the arrow keys, Home and End move between its calls. Each call opens its Agents page, and its tip gives the item, model, tokens and times. Rows keep a fixed order, so a row does not move when its work starts or ends; calls on repos the reader cannot see are left out.
@@ -62,6 +74,8 @@ Done counts and trends start at `settings.tracking_started_at`, set when the dat
 - The pick narrows the list pages only: Items, the Work queue, Activity and the project page. A list page keeps its project in its URL (`?repo=`; with a pick and none in the URL it adds the pick, without a new history entry), so a copied link shows the same list; opening a link with `?repo=X` shows X's list and leaves the pick as it is. The server applies the project only on its list routes (`x-autocraft-scope`, routes marked `scoped`) and only to hide more. Pages reached by their own link (an item, a batch, a job, an agent run, a security finding), search, settings and every write show every repo the user may see.
 
 ### Stats (progress)
+
+One page with the parts below and, folded, Main CI, nightly checks, Cost, Activity and Rates, Classifiers and Downloads.
 
 - Org totals at the top: open now, done by the pipeline since tracking began (merged / closed), closed by others, items closed per hour over the last 24 h, items waiting for an answer. Steps the pipeline hasn't reached yet say "not started yet".
 - Funnel chart for the org, then a table with one row per repo (sortable by open count, done count, waiting for an answer).
@@ -80,7 +94,7 @@ One list over every item of the visible repos, narrowed to the picked project. T
 
 | Qualifier | Values |
 |---|---|
-| `is:` | `pr`, `issue`, `open`, `closed`, `merged`, `draft` (open draft pull requests; `draft:true` is the same), `ready` (open pull requests that are not drafts; `draft:false`), `outside` (author is outside the team: not an owner, member or collaborator, nor a bot; for operators and maintainers also not an operator, maintainer or AutoCraft's own login), `mine` (I started, approved, held or answered it), `asked` (its open question is mine), `approved` (approved for merge), `duplicate`, `outside-held`; operators and maintainers also `security`, `stuck` |
+| `is:` | `pr`, `issue`, `open`, `closed`, `merged`, `draft` (open draft pull requests; `draft:true` is the same), `ready` (open pull requests that are not drafts; `draft:false`), `outside` (author is outside the team: not an owner, member or collaborator, nor a bot; for operators and maintainers also not an operator, maintainer or AutoCraft's own login), `mine` (I started, approved, held or answered it), `asked` (its open question is mine), `approved` (approved for merge), `duplicate`, `outside-held`; operators and maintainers also `security`, `stuck` (open, nothing is due and nobody is asked), `stale` (open and live, but its plan's state and wait have not changed for `liveness_long_days`, 7 by default; items parked by a person, waiting on an asked question or an issue waiting on its open PR do not count). Both are the liveness check's last stored result (`src/liveness.ts`) |
 | `label:` `author:` `repo:` `area:` | names; `area:none` |
 | `priority:` | `P0`–`P4` (the rated level) |
 | `kind:` | classification: `bug`, `feature`, `perf`, `extra`, `plugin`, `infra` |
@@ -137,9 +151,9 @@ The item page shows a "Discord N" badge in its header and, in the details, a lis
 
 `/privacy` and `/terms` are the pages outside sign-in: what the bot reads, what it keeps, what it never keeps, and how to ask for deletion.
 
-### Audit (operators and maintainers)
+### Audit (`/audit`, operators and maintainers)
 
-The audit log, filterable by login and action. Maintainers get only listed actions, and none for accounts or access (access changes, session revokes, sign-ins, account changes and logins); an action nobody listed stays hidden from them.
+In the rail's Reference group. The audit log, filterable by login and action. Maintainers get only listed actions, and none for accounts or access (access changes, session revokes, sign-ins, account changes and logins); an action nobody listed stays hidden from them.
 
 ### Cost
 
@@ -183,7 +197,7 @@ Settings navigation group; everyone signed in opens the page, for repos they can
 
 Operators and maintainers. Besides the Pipeline switch, the GitHub writes and the optional checks, a tracked repo has a **Build features** block: one switch per feature, each with one line saying what it does. It lists only the features an enabled build environment can run (`shownFeatures` in `src/build/features.ts`): Tests before push, Build batches and Implement queued issues always; Screenshots while an enabled environment reports a display; Nightly checks while one reports a nightly check's toolchain (rust-audit, rust-cross or rust-nightly). Build pull requests (CI stays in GitHub Actions) and scan tests (a confidential environment) keep their code and stored switches without a dashboard switch. An operator, or a maintainer with write permission on the repo, flips a switch; others see On or Off. The global Pipeline switch stops every feature, since each runs inside a pipeline job.
 
-### Rates (`/rates`)
+### Rates (part of Stats)
 
 Items moved per stage per hour (last 24 hours) or per day (last 7 days), with runs and failed runs, drawn as one small chart per stage; and each account's 5-hour and weekly use over time as lines on a 0 to 100 % scale with each window's pause level marked. A table view gives the stage totals as text. The charts redraw to the container width and stay readable at 390 px.
 

@@ -28,7 +28,6 @@ import { nextPageFixture } from "./nextMock";
 import { batchDetailMock } from "./batchMock";
 import { createQueueMock } from "./queueMock";
 import { mainCi } from "./mainCiMock";
-import { stuckItems } from "./stuckMock";
 import { MOCK_USERS, MOCK_REPO_OWNERS, NOW, REPOS, SEARCH_POOL, itemFor, progress, type MockRole } from "./fixtures";
 
 const wait = <T>(v: T, ms = 60) => new Promise<T>((r) => setTimeout(() => r(structuredClone(v)), ms));
@@ -232,7 +231,6 @@ export function createMockApi(): Api {
     },
     progress: () => wait(progress()),
     mainCi: () => wait(mainCi()),
-    stuckItems: () => wait(stuckItems()),
     ...createAreasMock(me, changed),
     ...createAdminMock(me, changed),
     mcp: mcpMock.mcp,

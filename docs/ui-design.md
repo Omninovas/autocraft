@@ -81,7 +81,7 @@ Rules:
 ## 4. Layout model
 
 - **Shell**: sidebar, 44 px top bar (breadcrumb, global search, live counters, role badge, theme toggle, user menu), workspace. Under the top bar, maintainers and operators with setup left see the setup bar (dashboard-spec.md, Help).
-- **Sidebar** (220 px, collapses to 52 px with `[`): ArtCraft logo, then Home, Items, Work queue, Agents and Stats, Runner, Help, and the Reference (Prompts, Environments, Repos, Scans) and Admin groups for those who may open them. A page the reader cannot open is left out.
+- **Sidebar** (220 px, collapses to 52 px with `[`): ArtCraft logo, then Home, Items, Work queue, Agents and Stats, Runner, Help, and the Reference (Prompts, Environments, Repos, Scans, Audit log) and Admin groups for those who may open them. A page the reader cannot open is left out.
 - **Workspace**: each view is a row of panels in a `PanelGroup`. Panels are resizable; panels marked `collapsible` fold to a narrow strip with a vertical label. Layouts are saved per user and view (`autocraft:<login>:layout:<view>` in localStorage; the storage adapter is two calls the server can implement later).
 - **Phones** (< 768 px): one column. A view either supplies its own phone component (Work queue) or its panels stack top to bottom, skipping those marked `hideOnPhone`. The bottom tab bar holds the first four entries (Home, Items, Work queue, Agents). A hamburger button left of the logo opens the sidebar as a left drawer: the same rail component (groups, icons, permission filtering, active state), scrolling on its own, with a scrim; it closes on scrim tap, Escape, close button and route change, traps focus and locks body scroll. Search opens full screen.
 
@@ -102,7 +102,7 @@ Rules:
 
 ### Home
 
-- One Task Runner line first ("0 Task Runners connected", "3 others available"), then problems, then the reader's own items: those they started, approved, held, resumed, answered or wrote about, newest conversation entry first. Show more opens `/items?filter=mine`. Viewers see the recently updated items of the repos they can see instead.
+- One Task Runner line first ("0 Task Runners connected", "3 others available"), then problems (Needs attention: each row links to what it names and carries its action, such as Resume or Release, at its right), then the reader's own items: those they started, approved, held, resumed, answered or wrote about, newest conversation entry first. Show more opens `/items?filter=mine`. Viewers see the recently updated items of the repos they can see instead.
 - Each row has its item link and GitHub button and the conversation's last message. A row whose open question is addressed to the reader is marked, and the Home entry in the sidebar counts those questions.
 - Editable fields use 16 px text on phones, so the page does not zoom on focus.
 

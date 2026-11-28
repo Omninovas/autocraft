@@ -1,7 +1,7 @@
 // The liveness check: every open item of a pipeline-on repo must be LIVE, meaning something will move it or a person has been asked.
 // An item that is neither is STUCK; a live item whose plan state and wait have not changed for a long time is LONG (a monitor
 // threshold, not a pipeline wait). The runner refreshes the stored result after planner passes (refreshLiveness); the health check,
-// the Stuck items page and `autocraft-server liveness` read it.
+// the Items filters `is:stuck` and `is:stale` and `autocraft-server liveness` read it.
 import { needsQuestion, type WaitCode } from "./core/codes.ts";
 import { blockersOfWait } from "./review/blockers.ts";
 import { readConfig } from "./data/control/index.ts";

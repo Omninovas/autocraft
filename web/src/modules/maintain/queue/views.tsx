@@ -16,6 +16,7 @@ import { useUser } from "../../../shell/UserContext";
 import { Button } from "../../../ui/atoms/Button";
 import { ErrorLine } from "../../../ui/atoms/ErrorLine";
 import { Pending } from "../../../ui/atoms/Pending";
+import { TextLink } from "../../../ui/atoms/TextLink";
 import { ItemRef } from "../../../ui/molecules/ItemRef";
 import { PENDING_STEP } from "../../queue/pendingStep";
 import { BATCH_STATE } from "../../queue/mergeParts";
@@ -115,7 +116,10 @@ function MergeQueue({ project, meta }: { project: string | null; meta: MaintainQ
   };
   return (
     <section aria-label={t("Merge queue")} className="flex flex-col gap-1">
-      <h2 className="mt-2 text-sm font-semibold text-ink/70">{t("Merge queue")}</h2>
+      <div className="mt-2 flex items-baseline justify-between gap-3">
+        <h2 className="text-sm font-semibold text-ink/70">{t("Merge queue")}</h2>
+        <TextLink to="/next" className="text-sm max-md:inline-flex max-md:min-h-11 max-md:items-center">{t("By step")}</TextLink>
+      </div>
       <div className="divide-y divide-line rounded-lg border border-line bg-panel">
         {first.batches.map((b) => (
           <div key={b.id}>

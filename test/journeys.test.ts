@@ -63,7 +63,7 @@ describe("PR journeys", () => {
     assert.equal(w.gh.writesOf("merge").length, 0);
   });
 
-  test("an unsure review of a started PR comes back with a recommendation; answered with merge, it is merged without another review, as the person who answered", async () => {
+  test("an unsure review of a started PR comes back with a recommendation; answered with merge, it is reviewed again as recommended and merged as the person who answered", async () => {
     const w = await (await (await (await (await (await fresh()).acting("mira")).pr(1)).workflow(1, { by: "mira", approved: false })).review(1, { sure: false })).verified(1);
     await w.premerge(1, "clean");
     const lane: LaneDeps = { vault: { userToken: async (login) => ({ ok: true, access: login === "mira" ? "user-token" : "other" }) }, permission: async () => "write" };
@@ -79,6 +79,10 @@ describe("PR journeys", () => {
     const answer = await runCommand(w.db, { login: "mira", canWrite: async () => true }, "dashboard", { parsed: parse("merge"), items: [{ repo: "app", number: 1 }] });
     assert.equal(answer.items[0]!.outcome, "run", answer.lines.join());
     const advance = () => untilQuiet(w.db, [() => advanceWorkflows(w.db), () => advancePreapprovals(w.db)], 3);
+    await advance();
+    assert.deepEqual((await w.prPlan(1)).actions.map((a) => a.kind), ["review"], "merge runs the recommendation: the review again");
+    await w.db.run(w.db.k.updateTable("main.opus_reviews").set({ sure: 1, at: new Date(Date.now() + 1000).toISOString() }).where("number", "=", 1));
+    await w.db.run(w.db.k.deleteFrom("main.review_state").where("number", "=", 1));
     await advance();
     assert.deepEqual((await w.prPlan(1)).actions.map((a) => a.kind), ["merge"]);
     assert.deepEqual((await merge()).merged, ["app#1"]);

@@ -24,7 +24,7 @@ const DECIDES: Record<Kind, readonly string[]> = {
     "src/workflow/advance.ts",
     "src/workflow/apply.ts",
     "src/workflow/resolve.ts",
-    "src/workflow/outside-resume.ts",
+    "src/workflow/retired-stops.ts",
     "src/workflow/store.ts",
   ],
 };

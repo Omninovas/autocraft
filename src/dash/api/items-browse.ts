@@ -4,6 +4,7 @@
 import type { BrowseResult, BrowseRow, PriorityLevel } from "../../../web/src/api/types.ts";
 import { forReader, KIND_NAMES, parseItemQuery, PRESETS } from "../../core/item-query.ts";
 import { countPresets, loadBrowsePage, loadFacets, type BrowseItem, type BrowseScope } from "../../data/views/items-browse.ts";
+import { loadInsiders } from "../../data/intake/index.ts";
 import { WEIGHT_NORMAL } from "../../workflow/types.ts";
 import type { Db } from "../../db/index.ts";
 import type { Req } from "../types.ts";
@@ -30,7 +31,7 @@ function labelsOf(json: string | null): string[] {
 
 const rowOf = (r: BrowseItem): BrowseRow => ({
   repo: r.repo, number: Number(r.number), kind: r.kind === "pr" ? "pr" : "issue", state: itemState(r.state), draft: Number(r.is_draft) === 1,
-  title: r.title || `${r.repo}#${r.number}`, author: r.author, outside: Number(r.outside) === 1, labels: labelsOf(r.labels),
+  title: r.title || `${r.repo}#${r.number}`, author: r.author, outside: Number(r.outside) === 1, team: Number(r.team) === 1, labels: labelsOf(r.labels),
   priority: (r.priority as PriorityLevel | null) ?? null, size: (r.size as BrowseRow["size"]) ?? null, classified: r.classified ? KIND_NAMES[r.classified] ?? r.classified : null,
   area: r.area, comments: Number(r.comments), reactions: Number(r.reactions), discord: Number(r.discord), linked: r.linked === null ? null : Number(r.linked),
   ci: r.kind === "pr" ? CI[r.ci_state ?? ""] ?? null : null, autocraft: r.autocraft as BrowseRow["autocraft"], asksYou: Number(r.asks_me) === 1,
@@ -45,8 +46,8 @@ export async function browse(db: Db, req: Req): Promise<BrowseResult> {
   const withPresets = req.query.get("presets") === "1";
   const refs = req.query.has("refs") ? (req.query.get("refs") ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, REFS_MAX) : undefined;
   if (refs?.some((r) => !/^[^#\s]+#\d+$/.test(r))) throw new HttpError(400, "refs must be repo#number");
-  const [repos, hidden] = await Promise.all([visibleRepos(db, req), hiddenRepos(db, req)]);
-  const scope: BrowseScope = { repos, hidden, staff, login: req.user.login || null };
+  const [repos, hidden, insiders] = await Promise.all([visibleRepos(db, req), hiddenRepos(db, req), loadInsiders(db)]);
+  const scope: BrowseScope = { repos, hidden, staff, login: req.user.login || null, insiders: [...insiders] };
   const presets = PRESETS.map((p) => ({ id: p.id, query: forReader(parseItemQuery(p.query), staff) }));
   const [page, counts, facets] = await db.together(() => Promise.all([
     loadBrowsePage(db, scope, query, { offset, limit, normalWeight: WEIGHT_NORMAL, ...(refs && { refs }) }),

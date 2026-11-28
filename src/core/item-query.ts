@@ -1,11 +1,12 @@
 // The Items browser's search grammar, shared by the server (src/data/views/items-browse.ts), the web page and its mock.
 // A query is words and qualifiers, GitHub style: `is:pr is:open label:bug sort:updated crash`. A qualifier is `key:value`, a
 // comma list of values matches any of them, a leading `-` negates it, and `"quoted text"` keeps spaces in a value or a phrase.
-// Words that are no qualifier are the full-text search; `#123` matches the number. Qualifiers this file does not know are
-// returned in `unknown`, so the page can say they were not applied.
+// Words that are no qualifier are the full-text search; `#123` matches the number. `items:craft-libs/3217,designcraft/12` lists
+// items by `[owner/]repo/number`: exactly those items, and none for a repo that is not tracked. Qualifiers this file does not know
+// are returned in `unknown`, so the page can say they were not applied.
 
 export type QueryKey =
-  | "type" | "state" | "label" | "priority" | "area" | "author" | "repo" | "kind" | "size" | "discord" | "has" | "ci" | "review" | "autocraft" | "flag";
+  | "type" | "state" | "label" | "priority" | "area" | "author" | "repo" | "kind" | "size" | "discord" | "has" | "ci" | "review" | "autocraft" | "flag" | "items";
 
 /** One qualifier: all its values are alternatives; `not` negates the whole term. Values are normalised (see VALUES). */
 export type QueryTerm = { key: QueryKey; values: string[]; not: boolean };
@@ -45,7 +46,23 @@ export const SIZES = ["S", "M", "L", "XL"] as const;
 export const CI_STATES = ["green", "red", "pending"] as const;
 
 const MAX_VALUES = 20;
+/** Items one `items:` term lists: as many as one command takes. */
+export const MAX_ITEMS = 100;
 const MAX_TOKENS = 40;
+const OWNER_PART = "[A-Za-z0-9][A-Za-z0-9-]{0,38}";
+const ITEM_VALUE = new RegExp(`^(?:(${OWNER_PART})/)?([A-Za-z0-9._-]{1,100})[/#](\\d{1,9})$`);
+
+/** An `items:` value as its parts: `owner/repo/12`, `repo/12` (owner null), or the same with `#`; null for anything else. */
+export function itemOfValue(v: string): { owner: string | null; repo: string; number: number } | null {
+  const m = ITEM_VALUE.exec(v.trim());
+  const number = m ? Number(m[3]) : 0;
+  return m && number > 0 ? { owner: m[1] ?? null, repo: m[2]!, number } : null;
+}
+
+/** The `items:` term of these items (`repo` may carry its owner, `owner/repo`), at most MAX_ITEMS of them. */
+export function itemsTerm(items: readonly { repo: string; number: number }[]): string {
+  return `items:${items.slice(0, MAX_ITEMS).map((i) => `${i.repo}/${i.number}`).join(",")}`;
+}
 
 /** Validates and normalises one value of `key`; null when it is not a value of that key. */
 function value(key: QueryKey, raw: string): string | null {
@@ -68,6 +85,10 @@ function value(key: QueryKey, raw: string): string | null {
     case "autocraft": return (AUTOCRAFT_STATES as readonly string[]).includes(lower) ? lower : null;
     case "flag": return (FLAGS as readonly string[]).includes(lower) ? lower : null;
     case "area": return lower === "none" ? "none" : v;
+    case "items": {
+      const i = itemOfValue(v);
+      return i ? `${i.owner ? `${i.owner}/` : ""}${i.repo}/${i.number}` : null;
+    }
     default: return v;
   }
 }
@@ -76,7 +97,7 @@ function value(key: QueryKey, raw: string): string | null {
 export function tokens(q: string): string[] {
   const out: string[] = [];
   const re = /-?(?:[A-Za-z-]+:)?"[^"]*"?|\S+/g;
-  const s = q.slice(0, 1000);
+  const s = q.slice(0, 4000);
   for (let m = re.exec(s); m && out.length < MAX_TOKENS; m = re.exec(s)) out.push(m[0]);
   return out;
 }
@@ -93,7 +114,7 @@ function isTerm(v: string): { key: QueryKey; value: string } | null {
 
 const ALIASES: Record<string, QueryKey> = {
   type: "type", state: "state", label: "label", priority: "priority", area: "area", author: "author", repo: "repo", kind: "kind", size: "size",
-  discord: "discord", has: "has", ci: "ci", review: "review", autocraft: "autocraft",
+  discord: "discord", has: "has", ci: "ci", review: "review", autocraft: "autocraft", items: "items",
 };
 
 export function parseItemQuery(q: string): ItemQuery {
@@ -117,7 +138,7 @@ export function parseItemQuery(q: string): ItemQuery {
     }
     const name = body.slice(0, colon).toLowerCase();
     const raw = unquote(body.slice(colon + 1));
-    const parts = raw.split(",").map((s) => s.trim()).filter(Boolean).slice(0, MAX_VALUES);
+    const parts = raw.split(",").map((s) => s.trim()).filter(Boolean).slice(0, name === "items" ? MAX_ITEMS : MAX_VALUES);
     if (name === "sort" && !not) {
       const m = /^([a-z]+)(-asc|-desc)?$/.exec(raw.toLowerCase());
       if (m && (SORTS as readonly string[]).includes(m[1]!)) sort = { by: m[1] as SortKey, asc: m[2] === "-asc" };

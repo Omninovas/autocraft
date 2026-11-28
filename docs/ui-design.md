@@ -60,7 +60,7 @@ Not taken: Archivo display headings, uppercase letter-spaced mono labels, regist
 
 Shared components in `web/src/ui/` are grouped by size:
 
-- `atoms/`: one element, no data fetching, no app domain types, styled only with tokens. ActionTag, Avatar, Badge, Button, Card, Chip, EmptyState, ErrorLine, GithubButton, Heading, Input, ItemIcon, Kbd, Logo, Pending, PriorityBadge, Select, Textarea, TextLink, Th, TimeAgo, Tooltip.
+- `atoms/`: one element, no data fetching, no app domain types, styled only with tokens. ActionTag, Avatar, Badge, Button, Card, Chip, EmptyState, ErrorLine, GithubButton, Heading, Input, ItemIcon, Kbd, LabelPill, Logo, Pending, PriorityBadge, Select, Textarea, TextLink, Th, TimeAgo, Tooltip.
 - `molecules/`: a few atoms doing one job, props only (no queries, no routing except `Link`). Block, CheckRow, ConfirmButton, Dialog, DisclosurePanel, ExpandableText, FilterOption, FilterSection, ItemRef, LabelledSelect, Markdown, MessageSample, OpusWorking, OverflowMenu, Pager, QueueBadge, QuickSelect, RadioRow, RateBar, RepoFilter, RepoSelect, SearchField, Segmented, Stat, StepDraft, StepFlow.
 - `ActionTag` is a muted pill (Phosphor icon and a word) for one GitHub write. It is never interactive: no border emphasis, no hover. `RadioRow` and `CheckRow` are the rows of a pick-one and a tick list (title, optional tag, content under the title, `CheckRow` also an action at the right edge). The item page's decision answer (`modules/item/ChoiceGroup.tsx`) shows each core action as a bordered card (an accordion that behaves as a radio group: `role=radio`, `aria-checked`, `aria-expanded`); the open card holds the parameters, the extras as `CheckRow`s, the note and the card's own button. Each card has a "GitHub" line (`ActionTag` pills) and an "AutoCraft" line (plain text, from the server's `ChoiceCore.autocraft`). `RadioRow` serves the plain answer of decisions without choices.
 - `organisms/`: a self-contained block with layout and behaviour (sorting, the phone switch). It may take domain-shaped props and never fetches. BrowseLayout, ItemPreview, Page, PreapprovalRow, QueuedCallRow.
@@ -92,10 +92,10 @@ Rules:
 
 ### Items
 
-- `/items` is one browser: the search box with qualifiers on its own row (the phone Filters button beside it), then the views as chips (one sideways-scrolling row on phones, the picked one kept in sight), then the quick filters (in a side sheet on phones). Grammar and views: dashboard-spec.md, Items.
-- Each quick filter is a select over one qualifier; Label, Priority, Area, Author and Sort read "Label: bug" when set. A value typed in the box that a list lacks still shows as picked. Qualifiers the server did not apply are listed as not applied, in warning text.
+- `/items` is one browser: the search box with qualifiers, the "Match: Words | Meaning" toggle (in the Filters panel on phones) and the Filters button on one row; the active filters as removable chips; the Filters panel, closed by default; then the views as chips (one sideways-scrolling row on phones, the picked one kept in sight). Grammar and views: dashboard-spec.md, Items.
+- Each filter in the panel is a select over one qualifier with its label above it; the empty option is "Any". A value typed in the box that a list lacks still shows as picked. The Filters button counts the active filters. Qualifiers the server did not apply are listed as not applied, in warning text.
 - Every change of the query adds one history entry; the query and the page offset are the URL (`?q=is:open+label:bug&offset=50`).
-- Rows are `ItemRef` rows, stretched; on phones the second line holds the markers, two labels and "+n", CI, counts, author and time; on desktop all labels, classification, size and area, with CI, counts and the linked item in a right-hand column.
+- Rows have two lines: `ItemRef` without its GitHub button (kind icon, `repo#number`, title), then AutoCraft's state and the markers, size (`S`, `M`, `L`, `XL`), CI, counts, the linked item and the labels as `LabelPill`s (two and "+n" on phones). A right column holds the GitHub button over the author, a team icon for authors on the team, and the time. On phones the item link covers the row; on desktop a row click opens the item in the side panel and the row is marked selected.
 
 ### Home
 
@@ -105,7 +105,7 @@ Rules:
 
 ### Items
 
-- The Items page is one paged list with a search box that takes qualifiers, a row of views and quick filters, and a command box at the top that runs a command on the ticked rows, each on its own (dashboard-spec.md, Items).
+- The Items page is one paged list with a search box that takes qualifiers, a row of views, a Filters panel, and a command bar pinned under the list while rows are ticked, which runs a command on the ticked rows, each on its own (dashboard-spec.md, Items).
 
 ### Item page
 

@@ -1,5 +1,5 @@
 // The Items browser's mock: about fifty items of several repos, matched by the same query grammar the server parses.
-import { forReader, KINDS, parseItemQuery, PRESETS, type ItemQuery, type QueryTerm } from "../../../../src/core/item-query.ts";
+import { forReader, itemOfValue, KINDS, parseItemQuery, PRESETS, type ItemQuery, type QueryTerm } from "../../../../src/core/item-query.ts";
 import type { BrowseQuery, BrowseResult, BrowseRow, User } from "../types";
 import { requestProject } from "../scope";
 import { NOW } from "./fixtures";
@@ -60,6 +60,7 @@ const SEEDS: Seed[] = [
   s({ repo: "vectorcraft", number: 512, kind: "pr", title: "Boolean union leaves a hairline gap", author: "pixel-wrangler", labels: ["bug"], priority: "P2", size: "S", classified: "bug", area: "Paths", comments: 2, ci: "green", updated: 19 } as Seed),
   s({ repo: "vectorcraft", number: 509, kind: "issue", title: "Offset path creates self-intersections on tight curves", author: "bezier-bo", outside: true, labels: ["bug", "geometry"], priority: "P1", classified: "bug", area: "Paths", comments: 3, updated: 24 } as Seed),
   s({ repo: "vectorcraft", number: 505, kind: "issue", title: "SVG import drops gradient transforms", author: "svg-sam", outside: true, labels: [], priority: "P2", classified: "bug", area: "Import", comments: 0, updated: 180 } as Seed),
+  s({ repo: "vectorcraft", number: 514, kind: "pr", title: "Draft: snap anchor points to the pixel grid", author: "ochre-fox", draft: true, labels: ["enhancement", "snapping"], priority: "P3", size: "XL", classified: "feature", area: "Paths", comments: 3, ci: "red", updated: 0.9 } as Seed),
   s({ repo: "vectorcraft", number: 500, kind: "pr", title: "CI: cache the font corpus between jobs", author: "ochre-fox", labels: ["ci"], priority: "P4", size: "S", classified: "infra", comments: 0, ci: "green", autocraft: "done", state: "merged", updated: 66 } as Seed),
 ];
 
@@ -67,7 +68,7 @@ const ROWS: (BrowseRow & { mine: boolean; replied: boolean; ready: boolean })[] 
   const r = x as Seed & { updated?: number; ready?: boolean };
   const h = r.updated ?? 10;
   return {
-    kind: "issue", state: "open", draft: false, author: null, outside: false, labels: [], priority: null, size: null, classified: null, area: null,
+    kind: "issue", state: "open", draft: false, author: null, outside: false, team: !r.outside && !!r.author && !r.author.endsWith("-bot"), labels: [], priority: null, size: null, classified: null, area: null,
     comments: 0, reactions: 0, discord: 0, linked: null, ci: null, autocraft: "none", asksYou: false, approved: false, duplicate: false,
     ...r, createdAt: ago(h * 3 + r.number % 17), updatedAt: ago(h), mine: !!r.mine, replied: !!r.replied, ready: !!r.ready,
   } as BrowseRow & { mine: boolean; replied: boolean; ready: boolean };
@@ -91,6 +92,10 @@ function termHolds(r: Row, t: QueryTerm): boolean {
     case "ci": return any((v) => r.ci === v);
     case "review": return r.ready;
     case "autocraft": return any((v) => r.autocraft === v);
+    case "items": return any((v) => {
+      const i = itemOfValue(v);
+      return !!i && i.repo === r.repo && i.number === r.number && (!i.owner || i.owner === "storytold");
+    });
     case "has": return any((v) => v === "pr" ? r.linked !== null : v === "label" ? r.labels.length > 0 : v === "priority" ? r.priority !== null : v === "area" ? r.area !== null
       : v === "kind" ? r.classified !== null : v === "discord" ? r.discord > 0 : r.replied);
     case "flag": return t.values.every((v) => v === "draft" ? r.kind === "pr" && r.state === "open" && r.draft : v === "ready" ? r.kind === "pr" && r.state === "open" && !r.draft : v === "outside" ? r.outside : v === "mine" ? r.mine : v === "asked" ? r.asksYou

@@ -95,3 +95,22 @@ test("is:draft matches only open draft pull requests, is:ready only open non-dra
     await db.close();
   }
 });
+
+test("items: lists exactly the named items of tracked repos; another owner's repo of that name and unknown items match nothing", async () => {
+  const db = await connectDb(":memory:");
+  try {
+    const item = (repo: string, number: number) => ({
+      repo, number, kind: "issue", state: "OPEN", title: `t${number}`, author: "ann", author_association: "NONE", labels: "[]", comments_count: 0, created_at: at(number), updated_at: at(number),
+    });
+    await db.run(db.k.insertInto("main.items").values([item("app", 1), item("app", 2), item("app", 3), item("app", 4), item("app", 5), item("other", 1)]));
+    const scope = { repos: ["app"], hidden: Object.assign(["other"], { visible: ["app"] }), staff: false, login: "ann" };
+    const numbers = async (q: string, s: typeof scope & { insiders?: string[] } = scope) =>
+      (await loadBrowsePage(db, s, parseItemQuery(q), { offset: 0, limit: 50, normalWeight: 5 })).rows.map((r) => `${r.repo}#${Number(r.number)}`).sort();
+    assert.deepEqual(await numbers("items:app/2,storytold/app/4,someone-else/app/5,app/999,missing/1,other/1"), ["app#2", "app#4"]);
+    // Operators and maintainers are on the team whatever GitHub's association says.
+    assert.equal((await numbers("is:outside items:app/1")).length, 1);
+    assert.deepEqual(await numbers("is:outside items:app/1", { ...scope, insiders: ["ann"] }), []);
+  } finally {
+    await db.close();
+  }
+});

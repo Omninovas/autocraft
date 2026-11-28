@@ -1,27 +1,34 @@
 // Items: a browser over every item of the visible repos. One search box takes words and qualifiers (src/core/item-query.ts),
-// kept in the URL as `q`; the views row sets the whole query, the quick filters change one qualifier each. The server filters,
-// sorts and pages. People who may send commands tick items, which opens the command box; the ticks are the command's items, kept
-// across pages and searches, and the box holds only the command's words. The command runs for each item on its own.
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type Ref } from "react";
-import { QuickSelect } from "../../../ui/molecules/QuickSelect";
+// kept in the URL as `q`; a paste that names items becomes an `items:` term. The views row sets the whole query, the Filters panel
+// changes one qualifier each, and the active qualifiers show as removable chips. The server filters, sorts and pages. On desktop a
+// row click opens the item beside the list (`open=<repo>/<n>`). People who may send commands tick items, which brings up the
+// command bar at the bottom; the ticks are the command's items, kept across pages and searches, and the bar takes only the
+// command's words. The command runs for each item on its own.
+import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type Ref, type RefObject } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ChatCircleIcon, CheckCircleIcon, CircleDashedIcon, DiscordLogoIcon, FunnelIcon, GitPullRequestIcon, RadioButtonIcon, TerminalIcon, XCircleIcon, XIcon } from "@phosphor-icons/react";
+import { CaretDownIcon, ChatCircleIcon, CheckCircleIcon, CircleDashedIcon, DiscordLogoIcon, FunnelIcon, GitPullRequestIcon, RadioButtonIcon, UsersThreeIcon, XCircleIcon, XIcon } from "@phosphor-icons/react";
 import { t } from "../../../../../src/i18n/index.ts";
-import { AUTOCRAFT_STATES, DEFAULT_QUERY, KINDS, PRESETS, PRIORITIES, parseItemQuery, presetOf, splitWords, termValues, withTerm, type QueryKey } from "../../../../../src/core/item-query.ts";
-import { listForm, parse } from "../../../../../src/workflow/parse.ts";
+import {
+  AUTOCRAFT_STATES, DEFAULT_QUERY, itemOfValue, itemsTerm, KINDS, PRESETS, PRIORITIES, parseItemQuery, presetOf, splitWords, termValues, tokens, withTerm,
+  type QueryKey, type QueryTerm,
+} from "../../../../../src/core/item-query.ts";
+import { itemsIn, listForm, parse } from "../../../../../src/workflow/parse.ts";
 import { useApi, useQuery } from "../../../api/client";
 import { usePageProject } from "../../../api/scope";
 import type { BrowseAutocraft, BrowseRow, MaintainCommandResult } from "../../../api/types";
-import { itemPath } from "../../../lib/links";
+import { githubItemUrl, itemPath } from "../../../lib/links";
 import { num } from "../../../lib/format";
 import { useUser } from "../../../shell/UserContext";
+import { useIsPhone } from "../../../shell/useMedia";
 import { Badge, type Tone } from "../../../ui/atoms/Badge";
 import { Button } from "../../../ui/atoms/Button";
 import { Chip } from "../../../ui/atoms/Chip";
+import { GithubButton } from "../../../ui/atoms/GithubButton";
+import { Input } from "../../../ui/atoms/Input";
+import { LabelPill } from "../../../ui/atoms/LabelPill";
 import { Pending } from "../../../ui/atoms/Pending";
-import { Textarea } from "../../../ui/atoms/Textarea";
+import { Select } from "../../../ui/atoms/Select";
 import { TimeAgo } from "../../../ui/atoms/TimeAgo";
-import { Dialog } from "../../../ui/molecules/Dialog";
 import { ItemRef } from "../../../ui/molecules/ItemRef";
 import { Pager } from "../../../ui/molecules/Pager";
 import { SearchField } from "../../../ui/molecules/SearchField";
@@ -35,6 +42,8 @@ const ITEMS_MAX = 100;
 /** Labels a phone row shows before "+n". */
 const PHONE_LABELS = 2;
 const refOf = (r: { repo: string; number: number }) => `${r.repo}#${r.number}`;
+/** Parameters from before the search box; a new query drops them. */
+const LEGACY = ["filter", "show", "discord", "area", "sort"];
 
 /** Links from before the search box (`filter=`, `show=`, `discord=1`, `area=`) as a query; null when the URL has none of them. */
 function legacyQuery(p: URLSearchParams): string | null {
@@ -50,7 +59,10 @@ function legacyQuery(p: URLSearchParams): string | null {
   return parts.length > 1 || show || parts[0] === "is:mine" ? parts.join(" ") : null;
 }
 
-/** The query and page in the URL, written readably: `?q=is:open+label:bug`. */
+/** Search parameters as text, with `:`, `,` and `/` left readable: `?q=is:open+label:bug&open=photocraft/12`. */
+const readable = (p: URLSearchParams) => p.toString().replace(/%3A/gi, ":").replace(/%2C/gi, ",").replace(/%2F/gi, "/");
+
+/** The query, page and opened item in the URL. Other parameters (`repo`) stay. */
 function useBrowseUrl() {
   const loc = useLocation();
   const navigate = useNavigate();
@@ -58,15 +70,29 @@ function useBrowseUrl() {
   const q = params.get("q") ?? legacyQuery(params) ?? DEFAULT_QUERY;
   const offset = Math.max(0, Number(params.get("offset")) || 0);
   const meaning = params.get("by") === "meaning";
+  const opened = params.get("open") ?? "";
+  const write = (next: URLSearchParams) => {
+    const search = readable(next);
+    navigate({ pathname: loc.pathname, search: search ? `?${search}` : "" });
+  };
   const go = (next: { q?: string; offset?: number; meaning?: boolean }) => {
     const nq = (next.q ?? q).trim();
     const nm = next.meaning ?? meaning;
     const no = (next.q !== undefined && nq !== q) || nm !== meaning ? 0 : next.offset ?? offset;
-    const enc = encodeURIComponent(nq).replace(/%20/g, "+").replace(/%3A/gi, ":").replace(/%2C/gi, ",");
-    const search = [nq === DEFAULT_QUERY ? "" : `q=${enc}`, nm ? "by=meaning" : "", no ? `offset=${no}` : ""].filter(Boolean).join("&");
-    navigate({ pathname: loc.pathname, search: search ? `?${search}` : "" });
+    const p = new URLSearchParams(loc.search);
+    for (const k of ["q", "by", "offset", ...LEGACY]) p.delete(k);
+    if (nq !== DEFAULT_QUERY) p.set("q", nq);
+    if (nm) p.set("by", "meaning");
+    if (no) p.set("offset", String(no));
+    write(p);
   };
-  return { q, offset, meaning, go };
+  /** Opens `repo#n` beside the list (`open=<repo>/<n>`). */
+  const open = (ref: string) => {
+    const p = new URLSearchParams(loc.search);
+    p.set("open", ref.replace("#", "/"));
+    write(p);
+  };
+  return { q, offset, meaning, opened, go, open };
 }
 
 const AUTOCRAFT_WORD: Record<BrowseAutocraft, { label: string; tone: Tone } | null> = {
@@ -93,10 +119,52 @@ function Ci({ ci }: { ci: BrowseRow["ci"] }) {
   );
 }
 
-/** Counts and links after the title: CI, comments, Discord mentions and the linked item. */
-function Meta({ r }: { r: BrowseRow }) {
+/** A row's tick box: 44 px on phones, 32 px on desktop, above the row's stretched item link. */
+function Tick({ id, label, checked, disabled, onChange, inputRef }: { id?: string; label: string; checked: boolean; disabled?: boolean; onChange: (on: boolean) => void; inputRef?: Ref<HTMLInputElement> }) {
   return (
-    <>
+    <label className={cn("relative z-10 -my-2 -ml-2 flex size-11 shrink-0 items-center justify-center md:-my-1 md:size-8", !disabled && "cursor-pointer")}>
+      <input id={id} ref={inputRef} type="checkbox" className="size-4 cursor-pointer accent-accent disabled:cursor-default" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} aria-label={label} />
+    </label>
+  );
+}
+
+/** The list header's tick: every row of this page the reader may run commands on; mixed while only some are ticked. */
+function SelectAll({ refs, picked, onPick, boxRef }: { refs: string[]; picked: ReadonlySet<string>; onPick: (refs: string[], on: boolean) => void; boxRef: RefObject<HTMLInputElement> }) {
+  const id = useId();
+  const on = refs.filter((r) => picked.has(r)).length;
+  const all = refs.length > 0 && on === refs.length;
+  useEffect(() => {
+    if (boxRef.current) boxRef.current.indeterminate = on > 0 && !all;
+  }, [on, all, boxRef]);
+  return (
+    <div className="flex items-center gap-2 border-b border-line px-3 py-1.5 text-sm text-ink/80">
+      <Tick id={id} inputRef={boxRef} label={t("Select all shown")} checked={all} disabled={!refs.length} onChange={() => onPick(refs, !all)} />
+      <label htmlFor={id} className={cn(refs.length ? "cursor-pointer" : "opacity-50")}>
+        {t("Select all shown")}
+      </label>
+    </div>
+  );
+}
+
+/** Line 2 of a row: AutoCraft's state and markers, then size, CI, counts and the linked item, then the labels. */
+function Facts({ r }: { r: BrowseRow }) {
+  const word = AUTOCRAFT_WORD[r.autocraft];
+  const size = r.size ? t("Size {s}", { s: r.size }) : "";
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 pl-6 text-xs text-ink/70">
+      {r.asksYou && <Badge tone="accent">{t("Asks you")}</Badge>}
+      {word && (
+        <span title={t(AUTOCRAFT_TITLE[r.autocraft])} className="relative z-10">
+          <Badge tone={word.tone}>{t(word.label)}</Badge>
+        </span>
+      )}
+      {r.priority && <Badge tone={priorityTone(r.priority)}>{r.priority}</Badge>}
+      {r.duplicate && <Badge tone="warn">{t("Duplicate")}</Badge>}
+      {r.size && (
+        <span role="img" aria-label={size} title={size} className="code relative z-10 inline-flex h-4 items-center rounded-sm border border-line-strong px-1 text-2xs text-ink/80">
+          {r.size}
+        </span>
+      )}
       <Ci ci={r.ci} />
       {r.comments + r.reactions > 0 && (
         <span className="relative z-10 inline-flex items-center gap-1" title={t("{c} comments, {r} reactions", { c: r.comments, r: r.reactions })}>
@@ -122,85 +190,56 @@ function Meta({ r }: { r: BrowseRow }) {
           <span className="num">#{r.linked}</span>
         </Link>
       )}
-    </>
-  );
-}
-
-/** A row's tick box: 44 px on phones, 32 px on desktop, above the row's stretched item link. */
-function Tick({ id, label, checked, disabled, onChange, inputRef }: { id?: string; label: string; checked: boolean; disabled?: boolean; onChange: (on: boolean) => void; inputRef?: Ref<HTMLInputElement> }) {
-  return (
-    <label className={cn("relative z-10 -my-2 -ml-2 flex size-11 shrink-0 items-center justify-center md:-my-1 md:size-8", !disabled && "cursor-pointer")}>
-      <input id={id} ref={inputRef} type="checkbox" className="size-4 cursor-pointer accent-accent disabled:cursor-default" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} aria-label={label} />
-    </label>
-  );
-}
-
-/** The list header's tick: every row of this page the reader may run commands on; mixed while only some are ticked. */
-function SelectAll({ refs, picked, onPick }: { refs: string[]; picked: ReadonlySet<string>; onPick: (refs: string[], on: boolean) => void }) {
-  const box = useRef<HTMLInputElement>(null);
-  const id = useId();
-  const on = refs.filter((r) => picked.has(r)).length;
-  const all = refs.length > 0 && on === refs.length;
-  useEffect(() => {
-    if (box.current) box.current.indeterminate = on > 0 && !all;
-  }, [on, all]);
-  return (
-    <div className="flex items-center gap-2 border-b border-line px-3 py-2 text-sm text-ink/80">
-      <Tick id={id} inputRef={box} label={t("Select all shown")} checked={all} disabled={!refs.length} onChange={() => onPick(refs, !all)} />
-      <label htmlFor={id} className={cn(refs.length ? "cursor-pointer" : "opacity-50")}>
-        {t("Select all shown")}
-      </label>
+      {r.labels.map((l, i) => (
+        <LabelPill key={l} name={l} className={cn(i >= PHONE_LABELS && "max-md:hidden")} />
+      ))}
+      {r.labels.length > PHONE_LABELS && (
+        <span className="md:hidden">
+          +{r.labels.length - PHONE_LABELS}
+          <span className="sr-only"> {t("labels")}</span>
+        </span>
+      )}
     </div>
   );
 }
 
-function Row({ r, opened, picking, picked, may, onPick }: { r: BrowseRow; opened: boolean; picking: boolean; picked: boolean; may: boolean; onPick: (on: boolean) => void }) {
-  const word = AUTOCRAFT_WORD[r.autocraft];
+function Row({ r, opened, byCreated, picking, picked, may, onPick, onOpen }: {
+  r: BrowseRow; opened: boolean; byCreated: boolean; picking: boolean; picked: boolean; may: boolean; onPick: (on: boolean) => void; onOpen: (() => void) | null;
+}) {
+  // On desktop a click on the row, away from its links and tick box, opens the item beside the list; on phones the item link covers the row.
+  const click = (e: MouseEvent<HTMLLIElement>) => {
+    if (!onOpen || (e.target as HTMLElement).closest("a, button, input, label, select, textarea") || window.getSelection()?.toString()) return;
+    onOpen();
+  };
   return (
-    <li className="relative flex items-start gap-2 px-3 py-2 hover:bg-ink/[0.025]" data-row>
+    <li
+      className={cn(
+        "relative flex items-start gap-2 px-3 py-2 hover:bg-ink/[0.025] md:py-1.5",
+        onOpen && "cursor-pointer",
+        opened && "bg-accent/[0.08] before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-accent hover:bg-accent/[0.1]",
+      )}
+      aria-current={opened ? "true" : undefined}
+      data-row={refOf(r)}
+      onClick={click}
+    >
       {picking && <Tick label={t("Select {ref}", { ref: refOf(r) })} checked={picked} disabled={!may} onChange={onPick} />}
       <div className="min-w-0 flex-1">
-        <ItemRef repo={r.repo} number={r.number} kind={r.kind} state={r.state} draft={r.draft} title={r.title} stretch />
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 pl-6 text-xs text-ink/70">
-          {r.asksYou && <Badge tone="accent">{t("Asks you")}</Badge>}
-          {word && (
-            <span title={t(AUTOCRAFT_TITLE[r.autocraft])} className="relative z-10">
-              <Badge tone={word.tone}>{t(word.label)}</Badge>
-            </span>
-          )}
-          {r.priority && <Badge tone={priorityTone(r.priority)}>{r.priority}</Badge>}
-          {r.duplicate && <Badge tone="warn">{t("Duplicate")}</Badge>}
-          {r.labels.map((l, i) => (
-            <span key={l} className={cn("inline-flex h-5 max-w-[16rem] items-center truncate rounded-full border border-line-strong px-2 text-2xs text-ink/80", i >= PHONE_LABELS && "max-md:hidden")}>
-              {l}
-            </span>
-          ))}
-          {r.labels.length > PHONE_LABELS && <span className="md:hidden">+{r.labels.length - PHONE_LABELS}</span>}
-          {r.classified && (
-            <span className="relative z-10 max-md:hidden" title={t("Classified by AutoCraft")}>
-              {KINDS[r.classified] ?? r.classified}
-            </span>
-          )}
-          {r.size && <span className="max-md:hidden">{t("size {s}", { s: r.size })}</span>}
-          {r.area && <span className="max-md:hidden">{r.area}</span>}
-          <span className="flex items-center gap-2 md:hidden">
-            <Meta r={r} />
-          </span>
-          <span className="ml-auto flex items-center gap-1 whitespace-nowrap">
-            {r.author && (
-              <span>
-                {r.author}
-                {r.outside && <span> ({t("outside")})</span>}
-              </span>
-            )}
-            <span aria-hidden>·</span>
-            {opened && <span>{t("opened")}</span>}
-            <TimeAgo iso={opened ? r.createdAt : r.updatedAt} className="relative z-10" />
-          </span>
-        </div>
+        <ItemRef repo={r.repo} number={r.number} kind={r.kind} state={r.state} draft={r.draft} title={r.title} github={false} stretch="phone" />
+        <Facts r={r} />
       </div>
-      <div className="hidden w-36 shrink-0 items-center justify-end gap-3 pt-0.5 text-xs text-ink/70 md:flex">
-        <Meta r={r} />
+      <div className="flex shrink-0 flex-col items-end gap-1.5 pt-0.5 text-xs text-ink/70">
+        <GithubButton href={githubItemUrl(r.repo, r.number, r.kind)} label={t("Open {ref} on GitHub", { ref: refOf(r) })} />
+        <span className="flex items-center gap-1 whitespace-nowrap">
+          {r.author && <span className="max-w-[7.5rem] truncate md:max-w-[10rem]">{r.author}</span>}
+          {r.team && (
+            <span role="img" aria-label={t("On the team")} title={t("On the team")} className="relative z-10 inline-flex text-accent-ink">
+              <UsersThreeIcon weight="bold" />
+            </span>
+          )}
+          {r.author && <span aria-hidden>·</span>}
+          {byCreated && <span>{t("opened")}</span>}
+          <TimeAgo iso={byCreated ? r.createdAt : r.updatedAt} className="relative z-10" />
+        </span>
       </div>
     </li>
   );
@@ -210,8 +249,27 @@ const SORT_OPTIONS: [string, string][] = [
   ["updated", "Recently updated"], ["created", "Newest"], ["created-asc", "Oldest"], ["comments", "Most discussed"], ["priority", "Priority"], ["discord", "Discord mentions"],
 ];
 
-/** The quick filters over the query's qualifiers; each change rewrites one qualifier of `q`. */
-function QuickFilters({ q, set, facets, repos, meaning }: { q: string; set: (q: string) => void; facets: { labels: string[]; authors: string[]; areas: string[] } | null; repos: string[] | null; meaning: boolean }) {
+/** A filter control: its visible label above a select. */
+function FilterField({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: [string, string][] }) {
+  const id = useId();
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <label htmlFor={id} className="text-xs font-medium text-ink/70">
+        {label}
+      </label>
+      <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} className="w-full">
+        {options.map(([v, l]) => (
+          <option key={v} value={v}>
+            {l}
+          </option>
+        ))}
+      </Select>
+    </div>
+  );
+}
+
+/** The Filters panel's controls over the query's qualifiers; each change rewrites one qualifier of `q`. */
+function FilterControls({ q, set, facets, repos, meaning }: { q: string; set: (q: string) => void; facets: { labels: string[]; authors: string[]; areas: string[] } | null; repos: string[] | null; meaning: boolean }) {
   const one = (key: QueryKey) => termValues(q, key)[0] ?? "";
   const setOne = (key: QueryKey) => (v: string) => set(withTerm(q, key, v ? [v] : []));
   const parsed = parseItemQuery(q);
@@ -219,125 +277,189 @@ function QuickFilters({ q, set, facets, repos, meaning }: { q: string; set: (q: 
   // A value typed in the box that the lists do not hold still shows as picked.
   const withCurrent = (vs: string[], cur: string) => (cur && !vs.includes(cur) ? [cur, ...vs] : vs);
   const pairs = (vs: string[]) => vs.map((v): [string, string] => [v, v]);
+  const any: [string, string] = ["", t("Any")];
   const states = termValues(q, "state");
   const area = one("area");
   return (
     <>
-      {repos && <QuickSelect label={t("Repository")} value={one("repo")} onChange={setOne("repo")} options={[["", t("All repositories")], ...pairs(withCurrent(repos, one("repo")))]} />}
-      <QuickSelect label={t("Type")} value={one("type")} onChange={setOne("type")} options={[["", t("Issues and PRs")], ["issue", t("Issues")], ["pr", t("Pull requests")]]} />
-      <QuickSelect label={t("State")} value={states.length === 1 ? states[0]! : ""} onChange={setOne("state")} options={[["", t("Any state")], ["open", t("Open")], ["closed", t("Closed")], ["merged", t("Merged")]]} />
-      <QuickSelect label={t("Label")} prefix value={one("label")} onChange={setOne("label")} options={[["", t("Any label")], ...pairs(withCurrent(facets?.labels ?? [], one("label")))]} />
-      <QuickSelect label={t("Priority")} prefix value={one("priority")} onChange={setOne("priority")} options={[["", t("Any priority")], ...pairs([...PRIORITIES])]} />
-      <QuickSelect label={t("Area")} prefix value={area} onChange={setOne("area")} options={[["", t("Any area")], ...pairs(withCurrent(facets?.areas ?? [], area === "none" ? "" : area)), ["none", t("No area")]]} />
-      <QuickSelect label={t("Author")} prefix value={one("author")} onChange={setOne("author")} options={[["", t("Any author")], ...pairs(withCurrent(facets?.authors ?? [], one("author")))]} />
-      <QuickSelect
+      {repos && <FilterField label={t("Repository")} value={one("repo")} onChange={setOne("repo")} options={[any, ...pairs(withCurrent(repos, one("repo")))]} />}
+      <FilterField label={t("Type")} value={one("type")} onChange={setOne("type")} options={[any, ["issue", t("Issues")], ["pr", t("Pull requests")]]} />
+      <FilterField label={t("State")} value={states.length === 1 ? states[0]! : ""} onChange={setOne("state")} options={[any, ["open", t("Open")], ["closed", t("Closed")], ["merged", t("Merged")]]} />
+      <FilterField label={t("Label")} value={one("label")} onChange={setOne("label")} options={[any, ...pairs(withCurrent(facets?.labels ?? [], one("label")))]} />
+      <FilterField label={t("Priority")} value={one("priority")} onChange={setOne("priority")} options={[any, ...pairs([...PRIORITIES])]} />
+      <FilterField label={t("Area")} value={area} onChange={setOne("area")} options={[any, ...pairs(withCurrent(facets?.areas ?? [], area === "none" ? "" : area)), ["none", t("None")]]} />
+      <FilterField label={t("Author")} value={one("author")} onChange={setOne("author")} options={[any, ...pairs(withCurrent(facets?.authors ?? [], one("author")))]} />
+      <FilterField
         label={t("AutoCraft")}
         value={one("autocraft")}
         onChange={setOne("autocraft")}
-        options={[["", t("Any AutoCraft state")], ...AUTOCRAFT_STATES.map((s): [string, string] => [s, s === "none" ? t("Not started") : t(AUTOCRAFT_WORD[s]!.label)])]}
+        options={[any, ...AUTOCRAFT_STATES.map((s): [string, string] => [s, s === "none" ? t("Not started") : t(AUTOCRAFT_WORD[s]!.label)])]}
       />
-      <QuickSelect label={t("Discord")} value={one("discord")} onChange={setOne("discord")} options={[["", t("Discord: any")], ["mentioned", t("Mentioned on Discord")]]} />
+      <FilterField label={t("Discord")} value={one("discord")} onChange={setOne("discord")} options={[any, ["mentioned", t("Mentioned")]]} />
       {/* Hits by meaning come best first: no sort applies. */}
-      {!meaning && <QuickSelect label={t("Sort")} prefix value={sort} onChange={(v) => set(withTerm(q, "sort", v === "updated" ? [] : [v]))} options={SORT_OPTIONS.map(([v, l]): [string, string] => [v, t(l)])} />}
+      {!meaning && <FilterField label={t("Sort")} value={sort} onChange={(v) => set(withTerm(q, "sort", v === "updated" ? [] : [v]))} options={SORT_OPTIONS.map(([v, l]): [string, string] => [v, t(l)])} />}
     </>
   );
 }
 
-/**
- * The command box: free text in the same words as on GitHub and Discord, for the ticked `items` or for a list written in the text
- * (`merge:` then items); the reply lines show what ran and what was unclear. With items ticked it stays in sight while the list scrolls.
- */
-function CommandBox({ text, setText, items, onClear, onDone }: { text: string; setText: (s: string) => void; items: string[]; onClear: () => void; onDone: (r: MaintainCommandResult) => void }) {
+const KEY_LABEL: Partial<Record<QueryKey, string>> = {
+  type: "Type", state: "State", label: "Label", priority: "Priority", area: "Area", author: "Author", repo: "Repository", kind: "Kind", size: "Size", ci: "CI", autocraft: "AutoCraft",
+};
+const VALUE_LABEL: Record<string, string> = { issue: "Issues", pr: "Pull requests", open: "Open", closed: "Closed", merged: "Merged", green: "passed", red: "failed", pending: "running" };
+const FLAG_LABEL: Record<string, string> = {
+  draft: "Drafts", ready: "Ready pull requests", outside: "Outside authors", mine: "Mine", asked: "Asks me", approved: "Approved for merge", duplicate: "Duplicates",
+  security: "Security", stuck: "Stuck", "outside-held": "Held outside authors",
+};
+const HAS_LABEL: Record<string, string> = { pr: "linked item", label: "label", priority: "priority", area: "area", kind: "classification", discord: "Discord mention", response: "maintainer reply" };
+
+/** A term in words: "Label: bug", "No label", "Not author: eve". */
+function termLabel(term: QueryTerm): string {
+  const vs = term.values;
+  const not = (s: string) => (term.not ? t("Not {f}", { f: s }) : s);
+  switch (term.key) {
+    case "flag": return not(vs.map((v) => t(FLAG_LABEL[v] ?? v)).join(", "));
+    case "has": return vs.map((v) => (term.not ? t("No {f}", { f: t(HAS_LABEL[v] ?? v) }) : t("Has {f}", { f: t(HAS_LABEL[v] ?? v) }))).join(", ");
+    case "discord": return not(t("On Discord"));
+    case "review": return not(t("Clean review"));
+    case "kind": return not(t("{key}: {value}", { key: t("Kind"), value: vs.map((v) => KINDS[v] ?? v).join(", ") }));
+    case "autocraft": return not(t("{key}: {value}", { key: "AutoCraft", value: vs.map((v) => (v === "none" ? t("Not started") : t(AUTOCRAFT_WORD[v as BrowseAutocraft]?.label ?? v))).join(", ") }));
+    default: return not(t("{key}: {value}", { key: t(KEY_LABEL[term.key] ?? term.key), value: vs.map((v) => t(VALUE_LABEL[v] ?? v)).join(", ") }));
+  }
+}
+
+type ActiveFilter = { key: string; label: string; without: string };
+
+/** The qualifiers of `q` as removable filters, sort aside; an `items:` term is one filter per item. */
+function activeFilters(q: string): { chips: ActiveFilter[]; count: number } {
+  const toks = tokens(q);
+  const chips: ActiveFilter[] = [];
+  let count = 0;
+  toks.forEach((tok, i) => {
+    const p = parseItemQuery(tok);
+    const term = p.terms.length === 1 ? p.terms[0]! : null;
+    if (!term) return;
+    count++;
+    const others = toks.filter((_, j) => j !== i);
+    if (term.key === "items" && !term.not) {
+      term.values.forEach((v, n) => {
+        const it = itemOfValue(v);
+        const rest = term.values.filter((_, m) => m !== n);
+        chips.push({ key: `${i}:${v}`, label: it ? `${it.owner ? `${it.owner}/` : ""}${it.repo}#${it.number}` : v, without: [...others, ...(rest.length ? [`items:${rest.join(",")}`] : [])].join(" ") });
+      });
+      return;
+    }
+    chips.push({ key: `${i}`, label: termLabel(term), without: others.join(" ") });
+  });
+  return { chips, count };
+}
+
+/** The bar pinned under the list while items are ticked: the count, Clear, the command's words, Run, and the reply lines. */
+function CommandBar({ text, setText, items, onClear, onDone, reply, onCloseReply }: {
+  text: string; setText: (s: string) => void; items: string[]; onClear: () => void; onDone: (r: MaintainCommandResult | null, error: string | null) => void;
+  reply: { lines: string[]; ok: boolean } | null; onCloseReply: () => void;
+}) {
   const api = useApi();
+  const phone = useIsPhone();
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<MaintainCommandResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [showLog, setShowLog] = useState(false);
-  const stuck = items.length > 0;
+  const [showReply, setShowReply] = useState(!phone);
   const read = parse(text);
   // The ticks are the items: text that names items as well, or more items than one command takes, does not run.
-  const blocked = !stuck ? null
-    : items.length > ITEMS_MAX ? t("At most {n} items in one command.", { n: ITEMS_MAX })
+  const blocked = items.length > ITEMS_MAX ? t("At most {n} items in one command.", { n: ITEMS_MAX })
     : (read.kind !== "ambiguous" && read.items?.length) || listForm(text) ? t("Write only the command's words while items are ticked.")
     : null;
   const run = async () => {
-    if (!text.trim() || busy || blocked) return;
+    if (!text.trim() || busy || blocked || !items.length) return;
     setBusy(true);
-    setError(null);
     try {
-      const r = await api.maintain.command(text, items.length ? { items } : {});
-      setResult(r);
-      onDone(r);
+      onDone(await api.maintain.command(text, { items }), null);
     } catch (e) {
-      setResult(null);
-      setError((e as Error).message);
+      onDone(null, (e as Error).message);
     } finally {
       setBusy(false);
     }
   };
   return (
-    <section aria-label={t("Command")} className={cn("flex flex-col gap-2 rounded-lg border border-line-strong bg-raised p-3", stuck && "sticky top-2 z-20 shadow-md")}>
-      <div className="flex min-h-8 flex-wrap items-center gap-x-3 gap-y-1">
-        <label htmlFor="items-command" className="text-sm font-medium">
-          {t("Command")}
-        </label>
-        {stuck && (
-          <>
-            <span className="num text-sm text-ink/70">{items.length === 1 ? t("1 item selected") : t("{n} items selected", { n: num(items.length) })}</span>
-            <Button variant="ghost" size="sm" icon={XIcon} onClick={onClear} className="-ml-1 max-md:h-11">
-              {t("Clear selection")}
-            </Button>
-          </>
-        )}
-      </div>
-      <Textarea
-        id="items-command"
-        value={text}
-        rows={items.length ? Math.min(4, Math.max(1, text.split("\n").length)) : Math.min(8, Math.max(3, text.split("\n").length + 1))}
-        placeholder={items.length ? "review and merge" : "merge:\nphotocraft#123\nphotocraft#456"}
-        aria-describedby={blocked ? "items-command-blocked" : undefined}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            void run();
-          }
-        }}
-        className="code text-sm"
-      />
-      <div className="flex items-center gap-2">
-        <Button variant="primary" onClick={() => void run()} loading={busy} disabled={!text.trim() || !!blocked} className="max-md:h-11">
-          {t("Run")}
-        </Button>
+    <section aria-label={t("Command")} className="shrink-0 border-t border-line-strong bg-raised shadow-[0_-6px_18px_rgba(0,0,0,0.14)]">
+      <div className="mx-auto flex max-w-[1100px] flex-col gap-2 px-4 py-2.5 md:px-6">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          {items.length > 0 ? (
+            <span className="flex items-center gap-1">
+              <span className="num text-sm font-medium">{items.length === 1 ? t("1 selected") : t("{n} selected", { n: num(items.length) })}</span>
+              <span aria-hidden className="text-ink/50">·</span>
+              <Button variant="ghost" size="sm" onClick={onClear} className="max-md:h-11">
+                {t("Clear")}
+              </Button>
+            </span>
+          ) : (
+            <span className="text-sm text-ink/70">{t("No items selected")}</span>
+          )}
+          {items.length > 0 && (
+            <form
+              className="flex min-w-0 flex-1 basis-72 items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void run();
+              }}
+            >
+              <label htmlFor="items-command" className="shrink-0 text-sm font-medium">
+                {t("Command")}
+              </label>
+              <Input
+                id="items-command"
+                value={text}
+                autoComplete="off"
+                placeholder="review and merge"
+                aria-describedby={blocked ? "items-command-blocked" : undefined}
+                aria-invalid={blocked ? true : undefined}
+                onChange={(e) => setText(e.target.value)}
+                className="code min-w-0 flex-1"
+              />
+              <Button type="submit" variant="primary" loading={busy} disabled={!text.trim() || !!blocked} className="max-md:h-11">
+                {t("Run")}
+              </Button>
+            </form>
+          )}
+          {reply && (
+            <span className="ml-auto flex items-center gap-1">
+              <Button variant="ghost" size="sm" icon={CaretDownIcon} aria-expanded={showReply} aria-controls="items-command-reply" onClick={() => setShowReply(!showReply)} className={cn("max-md:h-11 [&>svg]:transition-transform", !showReply && "[&>svg]:-rotate-90")}>
+                {t("Reply")}
+              </Button>
+              <Button variant="ghost" size="sm" icon={XIcon} aria-label={t("Close reply")} onClick={onCloseReply} className="max-md:h-11 max-md:w-11" />
+            </span>
+          )}
+        </div>
         {blocked && (
-          <span id="items-command-blocked" className="text-sm text-warn">
+          <p id="items-command-blocked" className="text-sm text-warn">
             {blocked}
-          </span>
-        )}
-        {/* On phones the box in sight keeps its reply folded, so it does not cover the list. */}
-        {stuck && (result || error) && (
-          <Button variant="ghost" aria-expanded={showLog} onClick={() => setShowLog(!showLog)} className="ml-auto h-11 md:hidden">
-            {showLog ? t("Hide reply") : t("Show reply")}
-          </Button>
-        )}
-      </div>
-      <div aria-live="polite" className={cn("flex max-h-40 flex-col gap-1 overflow-y-auto empty:hidden", stuck && !showLog && "max-md:sr-only")}>
-        {error && <p className="text-sm text-bad">{error}</p>}
-        {result?.lines.map((l, i) => (
-          <p key={i} className={cn("text-sm", result.items.length && result.items.every((x) => x.outcome === "run") ? "text-ink/80" : "text-warn")}>
-            {l}
           </p>
-        ))}
+        )}
+        {/* Folded, the lines stay in the live region, so they are still read out. */}
+        <div id="items-command-reply" aria-live="polite" className={cn("flex max-h-40 flex-col gap-1 overflow-y-auto empty:hidden", !showReply && "sr-only")}>
+          {reply?.lines.map((l, i) => (
+            <p key={i} className={cn("text-sm", reply.ok ? "text-ink/80" : "text-warn")}>
+              {l}
+            </p>
+          ))}
+        </div>
       </div>
     </section>
   );
 }
 
-/** Arrow keys, j/k, Home and End move the focus between the rows' item links, or between their tick boxes from a tick box. */
-function onListKey(e: KeyboardEvent<HTMLUListElement>) {
+/**
+ * Arrow keys, j/k, Home and End move the focus between the rows' item links, or between their tick boxes from a tick box; `p` opens
+ * the focused row beside the list.
+ */
+function listKey(e: KeyboardEvent<HTMLUListElement>, open: ((ref: string) => void) | null) {
   const target = e.target as HTMLElement;
   const tick = target instanceof HTMLInputElement && target.type === "checkbox";
   if ((target.tagName === "INPUT" && !tick) || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+  const row = target.closest<HTMLLIElement>("li[data-row]");
+  if (e.key === "p" && open && row) {
+    e.preventDefault();
+    open(row.dataset.row!);
+    return;
+  }
   // Each row's first link is its item link (ItemRef); a row whose tick box is disabled takes the focus on its link.
   const links = [...e.currentTarget.querySelectorAll<HTMLLIElement>("li[data-row]")].flatMap((li) => (tick ? li.querySelector<HTMLElement>("input[type=checkbox]:enabled") : null) ?? li.querySelector("a") ?? []);
   const at = links.findIndex((a) => a.closest("li")?.contains(document.activeElement));
@@ -347,18 +469,41 @@ function onListKey(e: KeyboardEvent<HTMLUListElement>) {
   links[Math.max(0, Math.min(links.length - 1, to))]!.focus();
 }
 
+const MATCH_TIPS = {
+  words: "Words: titles and text containing the words",
+  meaning: "Meaning: items whose title and text are about the same thing as the words, found by meaning, best match first",
+};
+
+function MatchToggle({ meaning, onChange, className }: { meaning: boolean; onChange: (meaning: boolean) => void; className?: string }) {
+  return (
+    <div className={cn("flex shrink-0 items-center gap-2", className)}>
+      <span aria-hidden className="text-xs font-medium text-ink/70">
+        {t("Match")}
+      </span>
+      <Segmented
+        label={t("Match")}
+        value={meaning ? "meaning" : "words"}
+        onChange={(v) => onChange(v === "meaning")}
+        options={[{ value: "words", label: t("Words"), tip: t(MATCH_TIPS.words) }, { value: "meaning", label: t("Meaning"), tip: t(MATCH_TIPS.meaning) }]}
+        className="flex-nowrap"
+      />
+    </div>
+  );
+}
+
 export function ItemsView(_: ViewProps) {
   const user = useUser();
   const project = usePageProject();
   const url = useBrowseUrl();
+  const phone = useIsPhone();
   const [typed, setTyped] = useState(url.q);
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [cmdOpen, setCmdOpen] = useState(false);
   const [cmd, setCmd] = useState("");
+  const [reply, setReply] = useState<{ lines: string[]; ok: boolean } | null>(null);
   const [announced, setAnnounced] = useState("");
-  const [sheet, setSheet] = useState(false);
-  const filtersButton = useRef<HTMLButtonElement>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const activeChip = useRef<HTMLButtonElement>(null);
+  const selectAllBox = useRef<HTMLInputElement>(null);
   const writes = user.role !== "viewer" && user.runRepos.length > 0;
 
   useEffect(() => setTyped(url.q), [url.q]);
@@ -382,6 +527,20 @@ export function ItemsView(_: ViewProps) {
   // Sorted by when they were opened, rows show that time instead of the last update.
   const byCreated = parseItemQuery(url.q).sort.by === "created";
   const set = (q: string) => url.go({ q });
+  const active = activeFilters(url.q);
+
+  // `open=<repo>/<n>`: the item shown beside the list on desktop.
+  const openRow = phone ? null : url.open;
+
+  // Text that names items becomes the list of exactly those items; a bare #n names an item only on a page scoped to one repo.
+  const paste = (e: ClipboardEvent<HTMLInputElement>) => {
+    const items = itemsIn(e.clipboardData.getData("text"), project ?? undefined);
+    if (!items.length) return;
+    e.preventDefault();
+    const q = itemsTerm(items);
+    setTyped(q);
+    set(q);
+  };
 
   const select = (next: Set<string>) => {
     setPicked(next);
@@ -391,105 +550,117 @@ export function ItemsView(_: ViewProps) {
     const next = new Set(picked);
     for (const r of refs) if (on) next.add(r); else next.delete(r);
     select(next);
-    if (next.size) setCmdOpen(true);
+  };
+  const clear = () => {
+    select(new Set());
+    selectAllBox.current?.focus();
   };
   // The items the command ran on leave the selection; those it refused or could not read stay ticked. The reply lines are the
   // announcement, so the selection's live region goes quiet.
-  const done = (r: MaintainCommandResult) => {
+  const done = (r: MaintainCommandResult | null, err: string | null) => {
+    setAnnounced("");
+    if (!r) {
+      setReply({ lines: [err ?? ""], ok: false });
+      return;
+    }
     const ran = new Set(r.items.filter((x) => x.outcome === "run").map(refOf));
     if (ran.size) setPicked((prev) => new Set([...prev].filter((p) => !ran.has(p))));
-    setAnnounced("");
-    if (r.items.length && ran.size === r.items.length) setCmd("");
+    const ok = r.items.length > 0 && ran.size === r.items.length;
+    setReply({ lines: r.lines, ok });
+    if (ok) setCmd("");
   };
+  const barShown = writes && (picked.size > 0 || !!reply);
 
-  const filters = <QuickFilters q={url.q} set={set} facets={counts?.facets ?? null} repos={project ? null : repoList ?? []} meaning={!!split?.words} />;
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-[1100px] flex-col gap-3 px-4 pb-10 pt-5 md:px-6">
-        <div className="flex items-center justify-between gap-2">
+    <div className="flex h-full flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex max-w-[1100px] flex-col gap-3 px-4 pb-6 pt-5 md:px-6">
           <h1 className="text-xl font-semibold">{t("Items")}</h1>
-          {writes && (
-            <Button icon={TerminalIcon} aria-expanded={cmdOpen} onClick={() => setCmdOpen(!cmdOpen)} className="max-md:h-11">
-              {picked.size ? t("Command ({n} selected)", { n: picked.size }) : t("Command")}
+          <p aria-live="polite" className="sr-only">
+            {announced}
+          </p>
+
+          <div className="flex gap-2">
+            <div className="min-w-0 flex-1">
+              <SearchField value={typed} onChange={setTyped} onSubmit={(v) => set(v)} onPaste={paste} label={t("Search items")} placeholder={t("Words, refs or links, or is:open label:bug")} />
+            </div>
+            <MatchToggle meaning={url.meaning} onChange={(m) => url.go({ meaning: m })} className="max-md:hidden" />
+            <Button icon={FunnelIcon} aria-expanded={filtersOpen} aria-controls="items-filters" onClick={() => setFiltersOpen(!filtersOpen)} className="max-md:h-11">
+              {t("Filters")}
+              {active.count > 0 && <span className="num rounded-full bg-ink/10 px-1.5 text-2xs leading-4">{active.count}</span>}
             </Button>
-          )}
-        </div>
-        {writes && cmdOpen && <CommandBox text={cmd} setText={setCmd} items={[...picked]} onClear={() => select(new Set())} onDone={done} />}
-        <p aria-live="polite" className="sr-only">
-          {announced}
-        </p>
-
-        <div className="flex gap-2">
-          <div className="min-w-0 flex-1">
-            <SearchField value={typed} onChange={setTyped} onSubmit={(v) => set(v)} label={t("Search items")} placeholder={t("Words, or is:open label:bug author:name")} />
           </div>
-          <Segmented
-            label={t("Search by")}
-            value={url.meaning ? "meaning" : "words"}
-            onChange={(v) => url.go({ meaning: v === "meaning" })}
-            options={[{ value: "words", label: t("Words") }, { value: "meaning", label: t("Meaning") }]}
-            className="hidden shrink-0 flex-nowrap md:flex"
-          />
-          <Button ref={filtersButton} icon={FunnelIcon} onClick={() => setSheet(true)} className="h-11 md:hidden" aria-haspopup="dialog">
-            {t("Filters")}
-          </Button>
-        </div>
 
-        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0" role="group" aria-label={t("Views")}>
-          {PRESETS.map((p) => (
-            <Chip key={p.id} ref={preset?.id === p.id ? activeChip : undefined} active={preset?.id === p.id} className="shrink-0 max-md:h-11" count={counts?.presets ? num(counts.presets[p.id] ?? 0) : undefined} onClick={() => set(p.query)}>
-              {t(p.label)}
-            </Chip>
-          ))}
-        </div>
-
-        <div className="hidden flex-wrap gap-2 md:flex" role="group" aria-label={t("Filters")}>
-          {filters}
-        </div>
-        <Dialog open={sheet} onClose={() => setSheet(false)} title={t("Filters")} variant="side" returnFocusRef={filtersButton}>
-          <div className="flex flex-col gap-3">
-            <Segmented
-              label={t("Search by")}
-              value={url.meaning ? "meaning" : "words"}
-              onChange={(v) => url.go({ meaning: v === "meaning" })}
-              options={[{ value: "words", label: t("Words") }, { value: "meaning", label: t("Meaning") }]}
-              className="flex-nowrap"
-            />
-            {filters}
-          </div>
-          <Button variant="primary" className="mt-4 h-11 w-full" onClick={() => setSheet(false)}>
-            {data ? t("Show {n} items", { n: num(data.total) }) : t("Done")}
-          </Button>
-        </Dialog>
-
-        {data && data.unknown.length > 0 && <p className="text-sm text-warn">{t("Not applied: {terms}", { terms: data.unknown.join(" ") })}</p>}
-        <div className="flex min-h-8 items-center justify-between gap-2 text-sm text-ink/70">
-          <span aria-live="polite" className="num">
-            {data ? (data.total === 1 ? t("1 item") : t("{n} items", { n: num(data.total) })) : ""}
-          </span>
-          {!preset && (
-            <Button variant="ghost" onClick={() => set(DEFAULT_QUERY)} className="max-md:h-11">
-              {t("Clear search")}
-            </Button>
-          )}
-        </div>
-
-        {!data ? (
-          <Pending error={error} />
-        ) : data.rows.length === 0 ? (
-          <div className="rounded-lg border border-line px-4 py-6 text-md">{t("No items match.")}</div>
-        ) : (
-          <div className="rounded-lg border border-line bg-panel">
-            {writes && <SelectAll refs={data.rows.filter((r) => user.runRepos.includes(r.repo)).map(refOf)} picked={picked} onPick={pick} />}
-            <ul className="divide-y divide-line" aria-label={preset ? t(preset.label) : t("Items")} onKeyDown={onListKey}>
-              {data.rows.map((r) => (
-                <Row key={refOf(r)} r={r} opened={byCreated} picking={writes} picked={picked.has(refOf(r))} may={user.runRepos.includes(r.repo)} onPick={(on) => pick([refOf(r)], on)} />
+          {active.chips.length > 0 && (
+            <ul className="flex flex-wrap gap-1.5" aria-label={t("Active filters")}>
+              {active.chips.map((c) => (
+                <li key={c.key}>
+                  <Chip aria-label={t("{filter}, remove", { filter: c.label })} onClick={() => set(c.without)} className="max-md:h-11">
+                    <span className={cn(c.label.includes("#") && "code")}>{c.label}</span>
+                    <XIcon aria-hidden className="text-ink/60" />
+                  </Chip>
+                </li>
               ))}
             </ul>
-            <Pager offset={data.offset} limit={data.limit} total={data.total} onOffset={(o) => url.go({ offset: o })} />
+          )}
+
+          {filtersOpen && (
+            <div id="items-filters" role="group" aria-label={t("Filters")} className="flex flex-col gap-3 rounded-lg border border-line bg-panel p-3">
+              <MatchToggle meaning={url.meaning} onChange={(m) => url.go({ meaning: m })} className="md:hidden" />
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                <FilterControls q={url.q} set={set} facets={counts?.facets ?? null} repos={project ? null : repoList ?? []} meaning={!!split?.words} />
+              </div>
+            </div>
+          )}
+
+          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0" role="group" aria-label={t("Views")}>
+            {PRESETS.map((p) => (
+              <Chip key={p.id} ref={preset?.id === p.id ? activeChip : undefined} active={preset?.id === p.id} className="shrink-0 max-md:h-11" count={counts?.presets ? num(counts.presets[p.id] ?? 0) : undefined} onClick={() => set(p.query)}>
+                {t(p.label)}
+              </Chip>
+            ))}
           </div>
-        )}
+
+          {data && data.unknown.length > 0 && <p className="text-sm text-warn">{t("Not applied: {terms}", { terms: data.unknown.join(" ") })}</p>}
+          <div className="flex min-h-8 items-center justify-between gap-2 text-sm text-ink/70">
+            <span aria-live="polite" className="num">
+              {data ? (data.total === 1 ? t("1 item") : t("{n} items", { n: num(data.total) })) : ""}
+            </span>
+            {!preset && (
+              <Button variant="ghost" onClick={() => set(DEFAULT_QUERY)} className="max-md:h-11">
+                {t("Clear search")}
+              </Button>
+            )}
+          </div>
+
+          {!data ? (
+            <Pending error={error} />
+          ) : data.rows.length === 0 ? (
+            <div className="rounded-lg border border-line px-4 py-6 text-md">{t("No items match.")}</div>
+          ) : (
+            <div className="rounded-lg border border-line bg-panel">
+              {writes && <SelectAll refs={data.rows.filter((r) => user.runRepos.includes(r.repo)).map(refOf)} picked={picked} onPick={pick} boxRef={selectAllBox} />}
+              <ul className="divide-y divide-line" aria-label={preset ? t(preset.label) : t("Items")} onKeyDown={(e) => listKey(e, openRow)}>
+                {data.rows.map((r) => (
+                  <Row
+                    key={refOf(r)}
+                    r={r}
+                    opened={!phone && url.opened === `${r.repo}/${r.number}`}
+                    byCreated={byCreated}
+                    picking={writes}
+                    picked={picked.has(refOf(r))}
+                    may={user.runRepos.includes(r.repo)}
+                    onPick={(on) => pick([refOf(r)], on)}
+                    onOpen={openRow && (() => openRow(refOf(r)))}
+                  />
+                ))}
+              </ul>
+              <Pager offset={data.offset} limit={data.limit} total={data.total} onOffset={(o) => url.go({ offset: o })} />
+            </div>
+          )}
+        </div>
       </div>
+      {barShown && <CommandBar text={cmd} setText={setCmd} items={[...picked]} onClear={clear} onDone={done} reply={reply} onCloseReply={() => setReply(null)} />}
     </div>
   );
 }

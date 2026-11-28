@@ -606,7 +606,7 @@ function ViewChips({ picked, counts, onPick }: { picked: string | null; counts: 
   const rest = PRESETS.filter((p) => !shown.includes(p));
   const chipCls = "shrink-0 max-md:h-11";
   return (
-    <div className="relative">
+    <div className="relative overflow-hidden">
       <div ref={box} className="flex flex-wrap gap-2" role="group" aria-label={t("Views")}>
         {shown.map((p) => (
           <Chip key={p.id} active={picked === p.id} className={chipCls} count={count(p.id)} onClick={() => onPick(p.query)}>

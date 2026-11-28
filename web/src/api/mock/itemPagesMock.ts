@@ -49,7 +49,7 @@ export function createItemPagesMock(me: User, base: Pick<Api, "security" | "item
       const it = await base.item(repo, number);
       const status = { phase: it.state === "merged" ? "Merged" : it.state === "closed" ? "Closed" : "Triage", waiting: null, next: null, since: it.updatedAt } as const;
       return wait({
-        repo, number, kind: it.kind, state: it.state, title: it.title, author: it.author, costUsd: 0, stamp: "mock", header: mockHeader(it.kind, it.labels),
+        repo, number, kind: it.kind, state: it.state, draft: false, title: it.title, author: it.author, costUsd: 0, stamp: "mock", header: mockHeader(it.kind, it.labels),
         status, bar: barFromStatus(status),
         reviews: { latest: null, earlier: [] }, timeline: [], screenshots: [],
         github: { description: it.body, url: `https://github.com/storytold/${repo}/${it.kind === "pr" ? "pull" : "issues"}/${number}`, events: [{ id: "g1", type: "opened", at: it.createdAt, actor: it.author, body: it.body, autocraft: null }], checks: [], commits: [], files: [], syncedAt: new Date(Date.now() - 120_000).toISOString() },

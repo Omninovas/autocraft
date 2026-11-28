@@ -56,7 +56,7 @@ export interface ItemPageHeader {
   backlog: { held: boolean; canSettle: boolean };
 }
 export interface ItemPageData {
-  repo: RepoName; number: number; kind: ItemKind; state: ItemState; title: string; author: string; stamp: string; header: ItemPageHeader;
+  repo: RepoName; number: number; kind: ItemKind; state: ItemState; draft: boolean; title: string; author: string; stamp: string; header: ItemPageHeader;
   status: ItemStatus; bar: ItemBar; costUsd: number; reviews: ReviewHistory; timeline: TimelineEntry[]; github: GithubSide;
   /** PRs: our own build of the newest head; null when the pr-builds switch is off or there is none. */
   prBuild: ItemPrBuild | null;
@@ -297,7 +297,7 @@ export async function itemPage(db: Db, req: Req): Promise<ItemPageData | ItemPag
   const costUsd = facts.trace.runs.reduce((s, r) => s + (r.costUsd ?? 0), 0);
   const ours = c.own;
   return {
-    repo: c.repo, number: c.n, kind: it.kind, state: it.state, title: it.title, author: it.author, stamp,
+    repo: c.repo, number: c.n, kind: it.kind, state: it.state, draft: it.kind === "pr" && Number(row.is_draft) === 1, title: it.title, author: it.author, stamp,
     header: headerOf(c, facts, it, backlog), status, bar: barOf(c, { kind: it.kind, state: it.state, mergedAt: it.mergedAt, pipelineOn: it.pipelineOn }, status, facts), costUsd,
     reviews: it.kind === "pr" ? reviewsOf(c, facts, headNow, ev) : { latest: null, earlier: [] },
     timeline: timelineOf(c, ev, pre, impl, facts, prBuildsOn).slice(-200),

@@ -39,7 +39,7 @@ const OBJECTS: [string, string[]][] = [
   ["/api/items/app/1", keys<Item>()("repo", "number", "title", "state", "author", "additions", "deletions", "ci", "mergeable", "classifications", "reviews", "premerge", "stages", "queue")],
   ["/api/security/findings", ["groups"]],
   ["/api/security/findings/app/1/page", ["finding", "question", "status", "attempts", "rounds", "history", "costUsd"]],
-  ["/api/items/app/1/page", keys<ItemPageData>()("repo", "number", "kind", "state", "title", "author", "stamp", "header", "status", "costUsd", "reviews", "timeline", "github")],
+  ["/api/items/app/1/page", keys<ItemPageData>()("repo", "number", "kind", "state", "draft", "title", "author", "stamp", "header", "status", "costUsd", "reviews", "timeline", "github")],
   ["/api/maintain/items", keys<MaintainItems>()("rows")],
   ["/api/queue/page", keys<QueuePage>()("tab", "repos", "counts", "rows", "mergeRows", "batches", "total", "next")],
   ["/api/pipeline", ["stages", "steps", "runner", "sync", "counts"]],

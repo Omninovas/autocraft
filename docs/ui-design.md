@@ -63,7 +63,7 @@ Shared components in `web/src/ui/` are grouped by size:
 - `atoms/`: one element, no data fetching, no app domain types, styled only with tokens. ActionTag, Avatar, Badge, Button, Card, Chip, EmptyState, ErrorLine, GithubButton, Heading, Input, ItemIcon, Kbd, Logo, Pending, PriorityBadge, Select, Textarea, TextLink, Th, TimeAgo, Tooltip.
 - `molecules/`: a few atoms doing one job, props only (no queries, no routing except `Link`). Block, CheckRow, ConfirmButton, Dialog, DisclosurePanel, ExpandableText, FilterOption, FilterSection, ItemRef, LabelledSelect, Markdown, MessageSample, OpusWorking, OverflowMenu, Pager, QueueBadge, QuickSelect, RadioRow, RateBar, RepoFilter, RepoSelect, SearchField, Segmented, Stat, StepDraft, StepFlow.
 - `ActionTag` is a muted pill (Phosphor icon and a word) for one GitHub write. It is never interactive: no border emphasis, no hover. `RadioRow` and `CheckRow` are the rows of a pick-one and a tick list (title, optional tag, content under the title, `CheckRow` also an action at the right edge). The item page's decision answer (`modules/item/ChoiceGroup.tsx`) shows each core action as a bordered card (an accordion that behaves as a radio group: `role=radio`, `aria-checked`, `aria-expanded`); the open card holds the parameters, the extras as `CheckRow`s, the note and the card's own button. Each card has a "GitHub" line (`ActionTag` pills) and an "AutoCraft" line (plain text, from the server's `ChoiceCore.autocraft`). `RadioRow` serves the plain answer of decisions without choices.
-- `organisms/`: a self-contained block with layout and behaviour (sorting, the phone switch). It may take domain-shaped props and never fetches. BrowseLayout, ItemPreview, Page, PreapprovalRow, QueuedCallRow.
+- `organisms/`: a self-contained block with layout and behaviour (sorting, the phone switch). It may take domain-shaped props and never fetches. BrowseLayout, GithubSide, ItemChatPane, ItemConversation, ItemHolds, ItemPreview, Page, PreapprovalRow, QueuedCallRow. The item page and the Items page's item panel share the chat organisms; their data hooks (`useItemChat`, `useItemPage`) live in `web/src/lib/hooks.ts`.
 - `ui/` itself holds helpers that are not components (`cn.ts`, `markdownHtml.ts`).
 - `modules/<m>/`: anything bound to one feature's data or wording. Pages compose the folders above and own their queries.
 
@@ -73,7 +73,7 @@ Rules:
 - Buttons, inputs, selects, textareas, links, pills, cards, table header cells and empty states are not styled by hand outside `ui/`. A class string of more than about six utilities that appears twice becomes a component.
 - Phone touch heights (44 px, `max-md:h-11`) are built into the atoms. Callers do not append them.
 - Names: the component name is the file name, with one exported component per file. Controlled inputs take `{value, onChange}`; `tone` sets colour, `size` is `sm | md | lg`, `label` is accessible text. Status label and tone maps live in `lib/status.ts`, not in components.
-- Items are always drawn with `ItemRef` (or `ItemIcon` plus text on the item page) (see Items above).
+- Items are always drawn with `ItemRef` (or `ItemIcon` plus text in the header of the item page and of the Items page's item panel) (see Items above).
 - Check `ui/` before writing a component. New shared components are added to the lists above with their folder.
 - Hooks shared by modules (`useWrite`, `useUrlState`) live in `web/src/lib/hooks.ts`.
 

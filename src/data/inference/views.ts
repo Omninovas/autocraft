@@ -13,12 +13,12 @@ type Raw = {
   items: string; item_count: number; first_repo: string | null; first_number: number | null; state: string; started_at: string; ended_at: string | null;
   input_tokens: number | null; output_tokens: number | null; cache_read_tokens: number | null; cache_write_tokens: number | null;
   cost_usd: number | null; summary: string | null; error: string | null; progress: string | null; user_login: string | null; harness: string | null; reported_model: string | null;
-  call_id: number | null; refusal: string | null;
+  call_id: number | null; token_id: number | null; refusal: string | null;
 };
 
 const RUN_COLS = [
   "id", "job_id", "step", "stage", "prompt_id", "prompt_version", "provider", "model", "items", "item_count", "state", "started_at", "ended_at",
-  "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost_usd", "summary", "error", "progress", "user_login", "harness", "reported_model", "call_id", "refusal",
+  "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost_usd", "summary", "error", "progress", "user_login", "harness", "reported_model", "call_id", "token_id", "refusal",
 ] as const;
 
 /** The select list of a `RunRow` over `agent_runs` aliased `alias`. */
@@ -40,7 +40,7 @@ const toRun = (r: Raw): RunRow => ({
   state: r.state as RunRow["state"], startedAt: r.started_at, endedAt: r.ended_at,
   tokens: { input: numOrNull(r.input_tokens), output: numOrNull(r.output_tokens), cacheRead: numOrNull(r.cache_read_tokens), cacheWrite: numOrNull(r.cache_write_tokens) },
   costUsd: numOrNull(r.cost_usd), summary: r.summary, error: r.error, progress: r.progress, userLogin: r.user_login, harness: r.harness, reportedModel: r.reported_model,
-  callId: numOrNull(r.call_id), refusal: r.refusal === "retried" || r.refusal === "failed" ? r.refusal : null,
+  tokenId: numOrNull(r.token_id), callId: numOrNull(r.call_id), refusal: r.refusal === "retried" || r.refusal === "failed" ? r.refusal : null,
 });
 
 const group = <K, V>(rows: V[], key: (v: V) => K): Map<K, V[]> => {
@@ -82,8 +82,11 @@ export async function listRuns(db: Db, f: RunFilter, vis: RunVisibility): Promis
   const cursor = f.cursor !== undefined && /^[0-9]+$/.test(f.cursor) ? Number(f.cursor) : null;
   const conds = (cursorCol: string) => (eb: kx.Eb) => eb.and([
     ...(cursor !== null ? [eb(cursorCol, "<", cursor)] : []),
-    ...(f.state && f.state !== "recent" ? [eb("r.state", "=", f.state)] : []),
+    ...(f.state === "finished" ? [eb("r.state", "!=", "running")] : f.state && f.state !== "recent" ? [eb("r.state", "=", f.state)] : []),
     ...(f.step ? [eb("r.step", "=", f.step)] : []),
+    ...(f.person ? [eb("r.user_login", "=", f.person)] : []),
+    // One credential is an ordered scan of agent_runs_token; several a plain IN list.
+    ...(f.tokenIds?.length === 1 ? [eb("r.token_id", "=", f.tokenIds[0]!)] : f.tokenIds ? [eb("r.token_id", "in", [...f.tokenIds])] : []),
     ...(f.refused ? [eb("r.refusal", "is not", null)] : []),
     ...(f.since ? [eb("r.started_at", ">=", f.since)] : []),
   ]);

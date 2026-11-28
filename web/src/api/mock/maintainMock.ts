@@ -176,7 +176,7 @@ export function createMaintainMock(me: User): Pick<Api, "maintain"> {
                 mine: own.slice(0, 8),
                 mineTotal: own.length,
                 recent: [],
-                runner: me.role === "operator" ? { mine: [{ name: "laptop", online: true, running: 1 }], others: 2 } : { mine: [], others: 3 },
+                runner: me.role === "operator" ? { mine: [{ name: "desk-1", online: true, running: 1 }], others: 2 } : { mine: [], others: 3 },
                 attention,
               };
         return new Promise((r) => setTimeout(() => r(structuredClone(home)), 60));

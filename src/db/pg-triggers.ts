@@ -23,6 +23,7 @@ import { featuresRepoOnlyPg, FEATURES_REPO_ONLY_VERSION } from "./feature-repo-o
 import { pingsSettledPg, PINGS_SETTLED_VERSION } from "./pings-settled.ts";
 import { retireFixAttemptsPg } from "./fix-retire.ts";
 import { backfillRefusalsPg } from "./refused-runs.ts";
+import { backfillRunTokensPg } from "./run-tokens.ts";
 import { holdsToItemsPg, HOLDS_TO_ITEMS_VERSION } from "./holds-to-items.ts";
 import { chatBackfillPg, CHAT_BACKFILL_VERSION } from "./chat-backfill.ts";
 import { PG_SCHEMA_GENERATION } from "./pg-generation.ts";
@@ -260,6 +261,7 @@ export async function migratePg(client: PgClient, opts: MigrationOpts = {}): Pro
     await m.step({ label: "features", run: () => featuresRepoOnlyPg(client) });
     await m.step({ label: "holds", run: () => holdsToItemsPg(client) });
     await m.step({ label: "refused runs", table: "agent_runs", run: () => backfillRefusalsPg(client) });
+    await m.step({ label: "run tokens", table: "agent_runs", run: () => backfillRunTokensPg(client) });
     await m.step({ label: "chat", run: () => chatBackfillPg(client) });
     await m.step({ label: "status pings", run: () => pingsSettledPg(client) });
     await copyStatePg(client, m);

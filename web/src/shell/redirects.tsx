@@ -61,6 +61,7 @@ const REDIRECTS: [path: string, element: ReactElement][] = [
   ["queue/*", <RedirectTo to="/next/steps" />],
   ["work", <RedirectTo to="/next/steps" />],
   ["merge-queue", <RedirectTo to="/next/merge" />],
+  ["model-queue", <RedirectTo to="/agents" search="?state=waiting" />],
   ["github-activity", <RedirectTo to="/activity" search="?kinds=write" />],
   ["now", <RedirectTo to="/activity" search="" />],
   ["flow", <RedirectTo to="/help/workflows" search="" />],

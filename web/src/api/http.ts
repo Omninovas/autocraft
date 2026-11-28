@@ -199,9 +199,10 @@ export function createHttpApi(): Api {
       deny: (code) => post("/api/runners/deny", { code }),
       revoke: (id) => post("/api/runners/revoke", { id }),
       setScopes: (id, scopes) => post("/api/runners/scopes", { id, ...scopes }),
+      rename: (id, label) => post("/api/runners/rename", { id, label }),
     },
     modelQueue: {
-      get: () => get("/api/model-queue"),
+      get: (f) => get(`/api/model-queue${qs(f ?? {})}`),
       pick: (id) => post(`/api/model-queue/${encodeURIComponent(String(id))}/pick`, {}),
       unpick: (id) => post(`/api/model-queue/${encodeURIComponent(String(id))}/unpick`, {}),
     },

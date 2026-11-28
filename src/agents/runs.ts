@@ -6,6 +6,8 @@ import * as inference from "../data/inference/index.ts";
 import type { HiddenRepos, RunEnd as ModuleRunEnd, RunRow, RunStart as ModuleRunStart } from "../data/inference/index.ts";
 import { loadItemsByBucket } from "../data/jobs/index.ts";
 import { loadShown } from "../data/mirror/index.ts";
+import { loadRunnerNames, loadRunnersByLabel } from "../data/runners/index.ts";
+import { runnerLabelFor } from "../remote/runner-label.ts";
 import { scrub } from "../runner/scrub.ts";
 import { WriteBatch } from "./batch.ts";
 import type { Db } from "../db/index.ts";
@@ -57,15 +59,23 @@ export async function failRunning(db: Db, reason: string, jobId?: number): Promi
 
 type Retries = Awaited<ReturnType<typeof inference.loadRetries>>;
 
+type Names = Awaited<ReturnType<typeof loadRunnerNames>>;
+
+/** The label of the Task Runner that ran a call, as `reader` may see it (runnerLabelFor). */
+function runnerOf(r: RunRow, names: Names, reader: string | null): string | undefined {
+  const n = r.tokenId === null ? undefined : names.get(r.tokenId);
+  return (n && runnerLabelFor(n, reader)) ?? undefined;
+}
+
 /** `via` and `refusal` go to staff only. */
-function toRun(r: RunRow, shown: Map<string, ItemShown>, staff: boolean, retries: Retries = new Map()): AgentRun {
+function toRun(r: RunRow, shown: Map<string, ItemShown>, staff: boolean, retries: Retries = new Map(), names: Names = new Map(), reader: string | null = null): AgentRun {
   const none: ItemShown = { kind: null, state: null, title: null };
   return {
     id: r.id, jobId: r.jobId, step: r.step, stage: r.stage, promptId: r.promptId, promptVersion: r.promptVersion,
     provider: r.provider, model: r.model,
     items: r.items.map((x) => ({ ...x, ...(shown.get(`${x.repo}#${x.number}`) ?? none) })), itemCount: r.itemCount, state: r.state, startedAt: r.startedAt, endedAt: r.endedAt,
     inputTokens: r.tokens.input, outputTokens: r.tokens.output, cacheReadTokens: r.tokens.cacheRead, cacheWriteTokens: r.tokens.cacheWrite, costUsd: r.costUsd, summary: r.summary,
-    ...(staff && r.userLogin && { via: { login: r.userLogin, harness: r.harness ?? "", model: r.reportedModel ?? "" } }),
+    ...(staff && r.userLogin && { via: { login: r.userLogin, harness: r.harness ?? "", model: r.reportedModel ?? "", ...(runnerOf(r, names, reader) !== undefined && { runner: runnerOf(r, names, reader) }) } }),
     ...(staff && r.refusal && { refusal: { outcome: r.refusal, retry: retries.get(r.id) ?? null } }),
     ...(r.state === "running" && r.progress && { progress: r.progress }),
   };
@@ -81,14 +91,25 @@ export class RunQueryError extends Error {
   }
 }
 
+const namesOf = async (db: Db, runs: RunRow[], staff: boolean): Promise<Names> => (staff ? await loadRunnerNames(db, runs.flatMap((r) => (r.tokenId === null ? [] : [r.tokenId]))) : new Map());
+
 const STEP_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
+const LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?$/;
+// A runner label (RUNNER_LABEL_MAX in src/dash/api/runners.ts): no control characters.
+const RUNNER_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
 const REPO_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const CURSOR_RE = /^[1-9][0-9]{0,15}$/;
 export const AGENT_PAGE_DEFAULT = 50, AGENT_PAGE_MAX = 200;
 
 /** Newest first, keyset on id: a page costs index reads proportional to its size, however many runs exist. */
-export async function listRuns(db: Db, f: AgentRunFilter, hidden: HiddenRepos = [], staff = false, nowMs: number = Date.now()): Promise<AgentRunPage> {
-  if (f.state !== undefined && !["running", "done", "failed", "recent"].includes(f.state)) throw new RunQueryError(400, "unknown state");
+/**
+ * Newest first, keyset on id: a page costs index reads proportional to its size, however many runs exist. `reader`: the signed-in login,
+ * who sees their own Task Runners' labels as they are.
+ */
+export async function listRuns(db: Db, f: AgentRunFilter, hidden: HiddenRepos = [], staff = false, nowMs: number = Date.now(), reader: string | null = null): Promise<AgentRunPage> {
+  if (f.state !== undefined && !["running", "done", "failed", "finished", "recent"].includes(f.state)) throw new RunQueryError(400, "unknown state");
+  if (f.person !== undefined && !LOGIN_RE.test(f.person)) throw new RunQueryError(400, "bad person");
+  if (f.runner !== undefined && !RUNNER_RE.test(f.runner)) throw new RunQueryError(400, "bad runner");
   if (f.step !== undefined && !STEP_RE.test(f.step)) throw new RunQueryError(400, "bad step");
   if (f.repo !== undefined && !REPO_RE.test(f.repo)) throw new RunQueryError(400, "bad repo");
   if (f.cursor !== undefined && !CURSOR_RE.test(f.cursor)) throw new RunQueryError(400, "bad cursor");
@@ -96,10 +117,15 @@ export async function listRuns(db: Db, f: AgentRunFilter, hidden: HiddenRepos = 
   if (f.window !== undefined && !WINDOWS.includes(f.window)) throw new RunQueryError(400, "window must be 24h, 7d or 30d");
   // Which runs a safety filter declined says something about their errors: viewers see neither.
   if ((f.refused || f.window !== undefined) && !staff) throw new RunQueryError(403, "operators and maintainers only");
-  const { window, ...rest } = f;
-  const { rows, nextCursor } = await inference.listRuns(db, { ...rest, limit: f.limit ?? AGENT_PAGE_DEFAULT, ...(window && { since: sinceOf(window, nowMs) }) }, { hidden, staff });
-  const [shown, retries] = await db.together(() => Promise.all([shownOf(db, rows), staff ? inference.loadRetries(db, rows.filter((r) => r.refusal !== null)) : Promise.resolve(new Map() as Retries)]));
-  return { runs: rows.map((x) => toRun(x, shown, staff, retries)), nextCursor };
+  // Who ran a call is shown to staff only, so viewers cannot filter by it either.
+  if ((f.person !== undefined || f.runner !== undefined) && !staff) throw new RunQueryError(403, "operators and maintainers only");
+  const { window, runner, ...rest } = f;
+  // A runner filter keeps the Task Runners of that label the reader may see the label of; none: no runs.
+  const tokenIds = runner === undefined ? undefined : (await loadRunnersByLabel(db, runner, f.person)).filter((n) => runnerLabelFor(n, reader) !== null).map((n) => n.id);
+  if (tokenIds !== undefined && !tokenIds.length) return { runs: [], nextCursor: null };
+  const { rows, nextCursor } = await inference.listRuns(db, { ...rest, limit: f.limit ?? AGENT_PAGE_DEFAULT, ...(window && { since: sinceOf(window, nowMs) }), ...(tokenIds && { tokenIds }) }, { hidden, staff });
+  const [shown, retries, names] = await db.together(() => Promise.all([shownOf(db, rows), staff ? inference.loadRetries(db, rows.filter((r) => r.refusal !== null)) : Promise.resolve(new Map() as Retries), namesOf(db, rows, staff)]));
+  return { runs: rows.map((x) => toRun(x, shown, staff, retries, names, reader)), nextCursor };
 }
 
 const WINDOWS: readonly RefusalWindow[] = ["24h", "7d", "30d"];
@@ -128,7 +154,7 @@ export async function refusals(db: Db, window: unknown, hidden: HiddenRepos = []
 }
 
 /** A run that touches a hidden repo is not found; prompt and output text go only to `texts` viewers (operators). */
-export async function getRun(db: Db, id: unknown, view: { hidden?: HiddenRepos; texts?: boolean } = { texts: true }): Promise<AgentRunDetail> {
+export async function getRun(db: Db, id: unknown, view: { hidden?: HiddenRepos; texts?: boolean; reader?: string } = { texts: true }): Promise<AgentRunDetail> {
   if (typeof id !== "number" || !Number.isInteger(id) || id < 1) throw new RunQueryError(400, "not a run id");
   const staff = view.texts === true;
   const [detail, checks] = await db.together(() => Promise.all([inference.loadRun(db, id, { hidden: view.hidden ?? [], staff }), loadModelChecksOfRun(db, id)]));
@@ -140,8 +166,8 @@ export async function getRun(db: Db, id: unknown, view: { hidden?: HiddenRepos; 
     return { seq: t.seq, tool: t.tool, args: t.args, resultBytes: t.resultBytes, isError: t.isError, startedAt: t.startedAt, endedAt: t.endedAt,
       check: t.checkId === null ? null : { id: t.checkId, command: c?.command ?? "", crate: c?.crate ?? null, testName: c?.testName ?? null, outcome: c?.outcome ?? null } };
   });
-  const [shown, retries] = await db.together(() => Promise.all([shownOf(db, [detail.run]), staff && detail.run.refusal ? inference.loadRetries(db, [detail.run]) : Promise.resolve(new Map() as Retries)]));
-  const run = toRun(detail.run, shown, staff, retries);
+  const [shown, retries, names] = await db.together(() => Promise.all([shownOf(db, [detail.run]), staff && detail.run.refusal ? inference.loadRetries(db, [detail.run]) : Promise.resolve(new Map() as Retries), namesOf(db, [detail.run], staff)]));
+  const run = toRun(detail.run, shown, staff, retries, names, view.reader ?? null);
   if (!view.texts) return { ...run, prompt: null, output: null, error: detail.run.error ? "failed" : null, tools, textsHidden: true };
   return { ...run, prompt: inference.unpackText(detail.prompt), output: inference.unpackText(detail.output), error: detail.run.error, tools };
 }

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Dialog } from "radix-ui";
-import { BookOpenIcon, CaretRightIcon, ChartLineUpIcon, CpuIcon, GearSixIcon, HouseIcon, ListBulletsIcon, ListIcon, MagnifyingGlassIcon, QuestionIcon, QueueIcon, SidebarSimpleIcon, XIcon, type Icon } from "@phosphor-icons/react";
+import { BookOpenIcon, CaretRightIcon, ChartLineUpIcon, CpuIcon, GearSixIcon, HouseIcon, ListBulletsIcon, ListIcon, MagnifyingGlassIcon, QuestionIcon, QueueIcon, RobotIcon, SidebarSimpleIcon, XIcon, type Icon } from "@phosphor-icons/react";
 import { t, tk } from "../../../src/i18n/index.ts";
 import { modules } from "../registry";
 import { can } from "../registry/permissions";
@@ -36,8 +36,9 @@ interface Page {
 const MAIN: Page[] = [
   { to: "/", label: tk("Home"), icon: HouseIcon },
   { to: "/items", label: tk("Items"), icon: ListBulletsIcon },
-  { to: "/queue", label: tk("Work queue"), icon: QueueIcon, also: ["/next", "/batches", "/model-queue"] },
-  { to: "/stats", label: tk("Stats"), icon: ChartLineUpIcon, also: ["/progress", "/activity", "/cost", "/downloads", "/rates", "/agents", "/classifiers", "/main-ci", "/nightly", "/stuck"] },
+  { to: "/queue", label: tk("Work queue"), icon: QueueIcon, also: ["/next", "/batches"] },
+  { to: "/agents", label: tk("Agents"), icon: RobotIcon },
+  { to: "/stats", label: tk("Stats"), icon: ChartLineUpIcon, also: ["/progress", "/activity", "/cost", "/downloads", "/rates", "/classifiers", "/main-ci", "/nightly", "/stuck"] },
 ];
 const RUNNER: Page = { to: "/runner", label: tk("Runner"), icon: CpuIcon, also: ["/connect"] };
 const REFERENCE: Page[] = [

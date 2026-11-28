@@ -1,6 +1,7 @@
 // Stats: what the pipeline got done, how main and the nightly checks stand, what it cost; the rest in folds.
 // Maintainers and viewers see it as well as operators. Hosted views drop their own frame and heading (Embedded).
 import type { ReactNode } from "react";
+import { TextLink } from "../../../ui/atoms/TextLink";
 import { Headline } from "./Headline";
 import { t } from "../../../../../src/i18n/index.ts";
 import { Embedded } from "../../../ui/organisms/Page";
@@ -12,7 +13,6 @@ import { Cost } from "../../cost/views";
 import { ActivityView } from "../../activity/views";
 import { Classifiers } from "../../classifiers/views";
 import { RatesView } from "../../rates/views";
-import { AgentsView } from "../../agents/views";
 import { Downloads } from "../../downloads/views";
 import type { ViewProps } from "../../../registry/types";
 
@@ -49,7 +49,7 @@ export function StatsView(props: ViewProps) {
               <div className="flex flex-col gap-6">
                 <ActivityView />
                 <RatesView />
-                <AgentsView {...props} />
+                <TextLink to="/agents?state=finished" className="text-sm">{t("Model calls that ran, on the Agents page")}</TextLink>
               </div>
             </Details>
             <Details title={t("Classifiers")}>

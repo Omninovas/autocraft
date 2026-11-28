@@ -18,7 +18,7 @@ import { loadLastEventId, loadNewestEventBy } from "../data/workflow/index.ts";
 import type { Db } from "../db/index.ts";
 import { ownerOf } from "../owners.ts";
 import type { CommandResult } from "./apply.ts";
-import { listForm } from "./parse.ts";
+import { listForm, parse } from "./parse.ts";
 import type { ItemRef } from "./types.ts";
 
 /** A stored message and the item it is on. */
@@ -62,11 +62,22 @@ async function storable(db: Db, o: SaidInput): Promise<ItemRef[]> {
   return out;
 }
 
-/** The text as a message on `item`: in the list form, when the list names the item, only the command words before the colon. */
+/** `name#n` or `owner/name#n` in a list names the tracked item `item` (an owner written must be the repo's). */
+const names = (i: ItemRef, item: ItemRef): boolean => i.number === item.number && trackedName(new Map([[item.repo, null]]), i.repo) === item.repo;
+
+/**
+ * The text as a message on `item`: only the command words before the colon when the text is a list-form command the parser reads, its
+ * items are the list (the words name none), and the list names the item. Any other text is stored as written.
+ */
 function ownBody(text: string, item: ItemRef): string {
   const list = listForm(text, item.repo);
   if (!list?.words) return text;
-  return list.items.some((i) => i.number === item.number && i.repo.split("/").pop()!.toLowerCase() === item.repo.toLowerCase()) ? list.words : text;
+  const read = parse(text, { repo: item.repo });
+  const head = parse(list.words, { repo: item.repo });
+  if (read.kind === "ambiguous" || head.kind !== "ambiguous" && head.items?.length) return text;
+  const all = read.items ?? [];
+  const same = all.length === list.items.length && list.items.every((l) => all.some((a) => a.number === l.number && a.repo.toLowerCase() === l.repo.toLowerCase()));
+  return same && list.items.some((l) => names(l, item)) ? list.words : text;
 }
 
 /** Stores the text as one message on each item it may be stored on (`storable`). Failures are logged, not thrown. */

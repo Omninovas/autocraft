@@ -7,6 +7,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChatCircleIcon, CheckCircleIcon, CircleDashedIcon, DiscordLogoIcon, FunnelIcon, GitPullRequestIcon, RadioButtonIcon, TerminalIcon, XCircleIcon, XIcon } from "@phosphor-icons/react";
 import { t } from "../../../../../src/i18n/index.ts";
 import { AUTOCRAFT_STATES, DEFAULT_QUERY, KINDS, PRESETS, PRIORITIES, parseItemQuery, presetOf, splitWords, termValues, withTerm, type QueryKey } from "../../../../../src/core/item-query.ts";
+import { listForm, parse } from "../../../../../src/workflow/parse.ts";
 import { useApi, useQuery } from "../../../api/client";
 import { usePageProject } from "../../../api/scope";
 import type { BrowseAutocraft, BrowseRow, MaintainCommandResult } from "../../../api/types";
@@ -29,6 +30,8 @@ import { cn } from "../../../ui/cn";
 import type { ViewProps } from "../../../registry/types";
 
 const PAGE = 50;
+/** Items in one command, as the server takes them (src/dash/api/commands.ts). */
+const ITEMS_MAX = 100;
 /** Labels a phone row shows before "+n". */
 const PHONE_LABELS = 2;
 const refOf = (r: { repo: string; number: number }) => `${r.repo}#${r.number}`;
@@ -262,12 +265,20 @@ function CommandBox({ text, setText, items, onClear, onDone }: { text: string; s
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<MaintainCommandResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showLog, setShowLog] = useState(false);
+  const stuck = items.length > 0;
+  const read = parse(text);
+  // The ticks are the items: text that names items as well, or more items than one command takes, does not run.
+  const blocked = !stuck ? null
+    : items.length > ITEMS_MAX ? t("At most {n} items in one command.", { n: ITEMS_MAX })
+    : (read.kind !== "ambiguous" && read.items?.length) || listForm(text) ? t("Write only the command's words while items are ticked.")
+    : null;
   const run = async () => {
-    if (!text.trim() || busy) return;
+    if (!text.trim() || busy || blocked) return;
     setBusy(true);
     setError(null);
     try {
-      const r = await api.maintain.command(text, { items });
+      const r = await api.maintain.command(text, items.length ? { items } : {});
       setResult(r);
       onDone(r);
     } catch (e) {
@@ -278,12 +289,12 @@ function CommandBox({ text, setText, items, onClear, onDone }: { text: string; s
     }
   };
   return (
-    <section aria-label={t("Command")} className={cn("flex flex-col gap-2 rounded-lg border border-line-strong bg-raised p-3", items.length > 0 && "sticky top-2 z-20 shadow-md")}>
+    <section aria-label={t("Command")} className={cn("flex flex-col gap-2 rounded-lg border border-line-strong bg-raised p-3", stuck && "sticky top-2 z-20 shadow-md")}>
       <div className="flex min-h-8 flex-wrap items-center gap-x-3 gap-y-1">
         <label htmlFor="items-command" className="text-sm font-medium">
           {t("Command")}
         </label>
-        {items.length > 0 && (
+        {stuck && (
           <>
             <span className="num text-sm text-ink/70">{items.length === 1 ? t("1 item selected") : t("{n} items selected", { n: num(items.length) })}</span>
             <Button variant="ghost" size="sm" icon={XIcon} onClick={onClear} className="-ml-1 max-md:h-11">
@@ -297,6 +308,7 @@ function CommandBox({ text, setText, items, onClear, onDone }: { text: string; s
         value={text}
         rows={items.length ? Math.min(4, Math.max(1, text.split("\n").length)) : Math.min(8, Math.max(3, text.split("\n").length + 1))}
         placeholder={items.length ? "review and merge" : "merge:\nphotocraft#123\nphotocraft#456"}
+        aria-describedby={blocked ? "items-command-blocked" : undefined}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -307,11 +319,22 @@ function CommandBox({ text, setText, items, onClear, onDone }: { text: string; s
         className="code text-sm"
       />
       <div className="flex items-center gap-2">
-        <Button variant="primary" onClick={() => void run()} loading={busy} disabled={!text.trim()} className="max-md:h-11">
+        <Button variant="primary" onClick={() => void run()} loading={busy} disabled={!text.trim() || !!blocked} className="max-md:h-11">
           {t("Run")}
         </Button>
+        {blocked && (
+          <span id="items-command-blocked" className="text-sm text-warn">
+            {blocked}
+          </span>
+        )}
+        {/* On phones the box in sight keeps its reply folded, so it does not cover the list. */}
+        {stuck && (result || error) && (
+          <Button variant="ghost" aria-expanded={showLog} onClick={() => setShowLog(!showLog)} className="ml-auto h-11 md:hidden">
+            {showLog ? t("Hide reply") : t("Show reply")}
+          </Button>
+        )}
       </div>
-      <div aria-live="polite" className="flex max-h-40 flex-col gap-1 overflow-y-auto empty:hidden">
+      <div aria-live="polite" className={cn("flex max-h-40 flex-col gap-1 overflow-y-auto empty:hidden", stuck && !showLog && "max-md:sr-only")}>
         {error && <p className="text-sm text-bad">{error}</p>}
         {result?.lines.map((l, i) => (
           <p key={i} className={cn("text-sm", result.items.length && result.items.every((x) => x.outcome === "run") ? "text-ink/80" : "text-warn")}>
@@ -323,12 +346,13 @@ function CommandBox({ text, setText, items, onClear, onDone }: { text: string; s
   );
 }
 
-/** Arrow keys, j/k, Home and End move the focus between the rows' item links. */
+/** Arrow keys, j/k, Home and End move the focus between the rows' item links, or between their tick boxes from a tick box. */
 function onListKey(e: KeyboardEvent<HTMLUListElement>) {
   const target = e.target as HTMLElement;
-  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
-  // Each row's first link is its item link (ItemRef).
-  const links = [...e.currentTarget.querySelectorAll<HTMLLIElement>("li[data-row]")].flatMap((li) => li.querySelector("a") ?? []);
+  const tick = target instanceof HTMLInputElement && target.type === "checkbox";
+  if ((target.tagName === "INPUT" && !tick) || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+  // Each row's first link is its item link (ItemRef); a row whose tick box is disabled takes the focus on its link.
+  const links = [...e.currentTarget.querySelectorAll<HTMLLIElement>("li[data-row]")].flatMap((li) => (tick ? li.querySelector<HTMLElement>("input[type=checkbox]:enabled") : null) ?? li.querySelector("a") ?? []);
   const at = links.findIndex((a) => a.closest("li")?.contains(document.activeElement));
   const to = e.key === "ArrowDown" || e.key === "j" ? at + 1 : e.key === "ArrowUp" || e.key === "k" ? at - 1 : e.key === "Home" ? 0 : e.key === "End" ? links.length - 1 : null;
   if (to === null || !links.length) return;
@@ -382,11 +406,13 @@ export function ItemsView(_: ViewProps) {
     select(next);
     if (next.size) setCmdOpen(true);
   };
-  // The items the command ran on leave the selection; those it refused or could not read stay ticked.
+  // The items the command ran on leave the selection; those it refused or could not read stay ticked. The reply lines are the
+  // announcement, so the selection's live region goes quiet.
   const done = (r: MaintainCommandResult) => {
-    const ran = r.items.filter((x) => x.outcome === "run").map(refOf);
-    if (ran.length && picked.size) select(new Set([...picked].filter((p) => !ran.includes(p))));
-    if (r.items.length && r.items.every((x) => x.outcome === "run")) setCmd("");
+    const ran = new Set(r.items.filter((x) => x.outcome === "run").map(refOf));
+    if (ran.size) setPicked((prev) => new Set([...prev].filter((p) => !ran.has(p))));
+    setAnnounced("");
+    if (r.items.length && ran.size === r.items.length) setCmd("");
   };
 
   const filters = <QuickFilters q={url.q} set={set} facets={counts?.facets ?? null} repos={project ? null : repoList ?? []} meaning={!!split?.words} />;

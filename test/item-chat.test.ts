@@ -161,7 +161,7 @@ test("a command list is stored only on items its sender may write to: never for 
     .select(["c.repo", "c.number", "m.payload"]).where("m.body", "=", body)) as { repo: string; number: number; payload: string | null }[];
 
   await listCommand(db, send("viewer", "hold: photocraft#7"));
-  assert.deepEqual(await said("hold"), [], "a viewer's words are stored nowhere");
+  assert.equal((await db.all(k.selectFrom("chat_messages").select("id").where("author", "=", "guest"))).length, 0, "a viewer's words are stored nowhere");
 
   const res = await listCommand(db, send("maintainer", "hold: otherorg/photocraft#7, photocraft#7, photocraft#99"));
   const rows = await said("hold");
@@ -182,6 +182,11 @@ test("a command for a list of items is one message on each item, holding the com
     .select(["c.repo", "c.number", "m.body"]).where("m.via", "=", "dashboard").where("m.author", "=", "op").where("m.body", "!=", "weight high")) as { repo: string; number: number; body: string }[];
   assert.deepEqual(rows.map((r) => `${r.repo}#${r.number}`).sort(), ["photocraft#7", "photocraft#8"]);
   for (const r of rows) assert.ok(!/#\d/.test(r.body) && r.body.includes("hold"), `photocraft#${r.number} keeps only the command words: ${r.body}`);
+
+  // Ticked items with text that names items as well: nothing runs and nothing is stored.
+  const res = await listCommand(db, { ...req("operator"), method: "POST", params: {}, json: { text: "merge: photocraft#8", items: ["photocraft#7"] } });
+  assert.ok(res.items.length === 0 && res.lines.length === 1);
+  assert.equal((await db.all(k.selectFrom("chat_messages").select("id").where("body", "like", "merge%"))).length, 0);
 });
 
 test("a maintainer's message waiting for Opus can be withdrawn from the chat, and then says who withdrew it", async () => {

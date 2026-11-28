@@ -300,7 +300,7 @@ export function AppShell() {
           <UserMenu theme={theme} setTheme={setTheme} onHelp={() => setHelp(true)} />
         </header>
         <SetupBanner user={user} />
-        <main className="min-h-0 flex-1">{content}</main>
+        <main tabIndex={-1} className="min-h-0 flex-1 outline-none">{content}</main>
         <PhoneTabs rail={rail} />
         <NavDrawer open={navOpen} onOpenChange={setNavOpen} rail={rail} />
         <Dialog.Root open={searchOpen} onOpenChange={setSearchOpen}>
@@ -366,7 +366,7 @@ export function AppShell() {
           <UserMenu theme={theme} setTheme={setTheme} onHelp={() => setHelp(true)} />
         </header>
         <SetupBanner user={user} />
-        <main className="min-h-0 flex-1 bg-panel">{content}</main>
+        <main tabIndex={-1} className="min-h-0 flex-1 bg-panel outline-none">{content}</main>
       </div>
       <ShortcutSheet open={help} onOpenChange={setHelp} />
     </div>

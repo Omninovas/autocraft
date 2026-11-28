@@ -2,7 +2,7 @@
 // from the workflow's own parser and confirmation (src/workflow), so they read as AutoCraft answers.
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeftIcon, CheckSquareIcon } from "@phosphor-icons/react";
+import { ArrowLeftIcon, CaretRightIcon, CheckSquareIcon } from "@phosphor-icons/react";
 import { t } from "../../../../src/i18n/index.ts";
 import { parse } from "../../../../src/workflow/parse.ts";
 import { resolve } from "../../../../src/workflow/resolve.ts";
@@ -29,7 +29,7 @@ const AT = "2026-11-28T09:31:00.000Z";
 const REPO = "photocraft";
 const ITEMS = [
   { number: 803, title: "Keep the alpha channel in PNG previews" },
-  { number: 19, title: "Brush preview lags on large canvases" },
+  { number: 19, title: "Speed up the brush preview on large canvases" },
 ];
 const SAID = "review and merge";
 const MAIN = COMMANDS.filter((c) => !c.more);
@@ -67,19 +67,18 @@ const HARNESS: Record<Harness, string> = {
 
 function RunnerStep({ done }: { done?: boolean }) {
   const [harness, setHarness] = useState<Harness>(typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent) ? "mac" : "linux");
-  const text = [`autocraft login ${location.origin}`, HARNESS[harness], "autocraft doctor", "autocraft service install"].join("\n");
+  const text = [HARNESS[harness], "autocraft doctor", "autocraft service install"].join("\n");
   return (
     <TutorialStep id="runner" n={2} title={t("Connect a Task Runner")} done={done} refs={[{ to: "/connect/setup", label: t("Setup guide") }, { to: "/runner", label: t("Runner page") }, { to: "/help/start", label: t("Overview") }]}>
       <p>{t("Model work runs on Task Runners: maintainers' own machines, on their own Claude or Codex subscription. What you start and what you ask the model runs on yours.")}</p>
       <p>
         {t("Install the runner with the first command of the")}{" "}
         <Link to="/connect/setup" className={linkCls}>{t("Setup guide")}</Link>
-        {t(". With it installed, these log it in to this server, pick the model login, check it and keep it running:")}
+        {t(". It logs the runner in to this server: open the link it prints and approve the code. Then pick the model login if setup did not, check the runner and keep it running:")}
       </p>
       <Segmented label={t("Model login")} value={harness} onChange={(v) => setHarness(v as Harness)} options={[{ value: "linux", label: t("Claude on Linux") }, { value: "mac", label: t("Claude on macOS") }, { value: "codex", label: "Codex" }]} />
       <CodeBlock compact title={t("Task Runner commands")} text={text} />
       <p>
-        <Code>autocraft login</Code> {t("prints a link with a code. Open it and approve the code.")}{" "}
         <Code>autocraft work</Code> {t("runs it in a terminal instead of as a service.")}
       </p>
       <p>
@@ -312,7 +311,7 @@ const STEPS = [
 export function TutorialView({ user }: ViewProps) {
   const { data } = useQuery("mention", (api) => api.mention());
   const mention = data?.mention ?? "app";
-  const setup = useSetupProgress(user);
+  const setup = useSetupProgress(user, { always: true });
   const check = (id: SetupCheck["id"]) => setup.checks?.find((c) => c.id === id);
   return (
     <div className="h-full overflow-y-auto">
@@ -345,6 +344,13 @@ export function TutorialView({ user }: ViewProps) {
         <TalkStep />
         <FollowStep />
         <AgentStep />
+        <Link to="/help/start" className="mt-2 flex min-h-12 items-center justify-between rounded-lg border border-line px-3 text-md hover:bg-ink/[0.04]">
+          <span>
+            <span className="text-sm text-ink/70">{t("Next:")} </span>
+            {t("Overview")}
+          </span>
+          <CaretRightIcon aria-hidden className="text-ink/60" />
+        </Link>
       </div>
     </div>
   );

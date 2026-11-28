@@ -48,7 +48,7 @@ import { blockWorkflow } from "./block.ts";
 import { checkedOtherHead, codeOf, detectBlocker, fixesFirst, LANE_STEPS, premergeStop, type BlockerFacts, type EndedLeg, type Found } from "./blockers.ts";
 import { again as fixAgain, EffectError, type Instruction } from "./effects.ts";
 import { premergeParts } from "./premerge.ts";
-import { afterPush, atBlocker, droppedOf, onConflict, planOf, type ReviewView } from "./recommend.ts";
+import { afterPush, atBlocker, droppedOf, onConflict, planOf, textFor, type ReviewView } from "./recommend.ts";
 import { askedBy, isOpenQuestion, openQuestionOf, viewOf } from "./question.ts";
 import { issueRecommendation, recommendsImplement } from "./issue-review.ts";
 import { listText, ROUND_STEP, stepsFor, type StepName } from "./status.ts";
@@ -723,6 +723,11 @@ async function advanceOne(db: Db, pass: Pass, writes: Writes, w0: ItemWorkflow):
       fix = partsToMake(plan, stored?.fixes ?? [], true).map((p) => p.n);
       const finding = (stored?.public_summary ?? stored?.reason ?? "").trim();
       if (finding) instruction = { text: clipText(finding, FINDING_FIX_CHARS), review: true };
+    }
+    // A conflict with the base branch that no step of ours merges first: no fix-up can be made before someone settles it.
+    if (conflict && conflict.path !== "merge") {
+      const rec = onConflict({ text: textFor({ fix, merges: true }), parts: { fix, drop: droppedOf(plan) }, merges: true }, conflict);
+      return await stop({ blocker: "other", params: { reason: t("it conflicts with its base branch, and no fix-up can be made before that is settled") } }, fixPlan, rec);
     }
     const tries = await operatorTries(db, w.repo, target, since);
     if (tries >= FIXUP_MAX_ATTEMPTS) {

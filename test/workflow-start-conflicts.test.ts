@@ -121,7 +121,7 @@ test("a yes on a conflict only the contributor can resolve approves the merge an
     const w = await conflicting({ verdict, canModify: false, before: async (w) => { if (asked) await conflictRow(w, "sha1", "asked"); } });
     const rec = (await liveWorkflow(w.db, "app", 1))!;
     assert.equal(rec.state, "recommending");
-    assert.match(recommendationText(rec.rec!), /contributor has to resolve.*approve the merge and wait/);
+    assert.match(recommendationText(rec.rec!), /contributor has to resolve.*the merge is approved and waits/);
     const yes = await send(w, "yes");
     assert.equal(yes.outcome, "run", yes.line);
     assert.match(yes.line, /until the contributor resolves the conflict/);
@@ -155,7 +155,7 @@ test("on a conflicting PR whose base merges of today are used up, a yes approves
   assert.ok((await acts(w, 1)).includes("conflict:merge"));
 });
 
-test("a yes to the pre-merge review's findings on a conflicting PR keeps them: the base is merged in, then the fix-up is made at the new head", async () => {
+test("the fix-up of the pre-merge review's findings AutoCraft asked for on a PR that comes to conflict is kept: the base is merged in, then the fix-up is made at the new head", async () => {
   const w = await conflicting({ verdict: "take" });
   await w.db.run(w.db.k.updateTable("main.pr_checks").set({ mergeable: "MERGEABLE" }));
   await w.db.run(w.db.k.deleteFrom("main.premerge_reviews"));
@@ -164,11 +164,10 @@ test("a yes to the pre-merge review's findings on a conflicting PR keeps them: t
   await w.premergeRoundsSpent(1);
   await run(w, "merge");
   await settle(w);
-  const blocked = (await liveWorkflow(w.db, "app", 1))!;
-  assert.deepEqual([blocked.state, blocked.rec!.parts.fix.length], ["blocked", 1], blocked.rec?.text ?? "");
+  const fixing = (await liveWorkflow(w.db, "app", 1))!;
+  assert.deepEqual([fixing.state, fixing.rec], ["running", null], "the approved merge asks nothing: the fix-up is asked for");
+  assert.deepEqual((await w.rows("SELECT from_head, state FROM operator_fixups")).map((r) => [r.from_head, r.state]), [["sha1", "queued"]]);
   await w.db.run(w.db.k.updateTable("main.pr_checks").set({ mergeable: "CONFLICTING" }));
-  await settle(w);
-  assert.match((await send(w, "yes")).line, /Fixing 1, then merging.*that merge comes first/);
   await settle(w);
   assert.equal((await liveWorkflow(w.db, "app", 1))!.state, "running");
   assert.deepEqual(await acts(w, 1), ["conflict:merge"]);

@@ -188,7 +188,7 @@ test("a started pull request whose pre-approved merge had stopped comes back wit
   const db = await legacy();
   // Stopped at a hold while it conflicts: its findings cannot be fixed before the base is merged.
   await db.prepare("UPDATE main.preapprovals SET reason = 'the review says hold' WHERE workflow_id = 1002").run();
-  await db.prepare("UPDATE main.opus_reviews SET verdict = 'hold', fixes = ? WHERE number = 5").run(JSON.stringify([{ file: "a.ts", anchor: "x", change: "Check the length." }]));
+  await db.prepare("UPDATE main.opus_reviews SET verdict = 'hold', model = 'm', fixes = ? WHERE number = 5").run(JSON.stringify([{ file: "a.ts", anchor: "x", change: "Check the length." }]));
   await insert(db, "pr_checks", { repo: "demo", number: 5, head_oid: "h5", state: "OPEN", overall: "success", checks: "[]", mergeable: "CONFLICTING", fetched_at: AFTER });
   await switchOver(db, { now: NOW });
   await advanceWorkflows(db);

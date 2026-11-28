@@ -32,6 +32,7 @@ import { CLAUDE_PROMPTS } from "../prompts/index.ts";
 import { loadQuiet } from "../data/security/index.ts";
 import { patchGiveaway, QUIET_PATCH_REFUSAL } from "../security/rules.ts";
 import { cachedDiff, ghDiff, type DiffFetcher } from "../review/diff.ts";
+import { checkoutDiff } from "./diff-view.ts";
 import { checkLine, parseCheck, recordCheck } from "../patchcheck/index.ts";
 import { CHECK_DIFF_CAP, CHECK_PATCH_CAP, type FixupCheckInput } from "../patchcheck/types.ts";
 import { CheckTool, applyCheck, refusal } from "../checktool/index.ts";
@@ -67,7 +68,7 @@ const ACTOR = "fixup";
 const PROMPT = CLAUDE_PROMPTS["fixup.patch"];
 const CHECK = CLAUDE_PROMPTS["fixup.check"];
 const CONFLICT = CLAUDE_PROMPTS["fixup.conflict"];
-/** Characters of one file shown whole (a larger file is shown in part, and the part is held to the same limit), of all files shown, and of the PR diff; over any of them the PR is held. */
+/** Characters of one file shown whole (a larger file is shown in part, and the part is held to the same limit), of all files shown, and of the PR diff; over any of them a PR without a checkout is held. With a checkout a longer diff is trimmed to DIFF_CAP (`checkoutDiff`). */
 export const FILE_CAP = 40_000;
 export const TOTAL_CAP = 120_000;
 export const DIFF_CAP = 60_000;
@@ -397,13 +398,21 @@ async function runFixupWith(db: Db, params: FixupParams, log: (line: string) => 
 
       const diff = await cachedDiff(db, repo, c.number, head, d.fetchDiff);
       if (!diff.ok) { await fail("failed", `no diff: ${oneLine(diff.error)}`); return; }
-      if (diff.text.length > DIFF_CAP) { await hold("too-large", `the PR diff is over the ${DIFF_CAP} character limit`); return; }
       // An operator's fix-up may edit any file of the repository a fix-up may touch: the instructions name no file. The PR's own files are the ones shown.
       if (c.operator) {
         files = [...new Set([...diff.text.matchAll(DIFF_FILE)].map((m) => m[1]!))].filter((p) => operatorEditable(p, scripts));
       }
-      // With a sandbox checkout the model reads the files itself, so they are listed by path and no size limit applies.
+      // With a sandbox checkout the model reads the files itself, so they are listed by path and no size limit applies,
+      // and a diff over the cap is shown as the named files' sections plus the other files by path.
       const checkout = (await d.checkout?.(repo, c.number, head)) ?? undefined;
+      if (!checkout && diff.text.length > DIFF_CAP) {
+        // A checkout that could not be made this time holds nothing: the next run tries again.
+        if (d.checkout) { log(`  ${ref}: skipped: the PR diff is over the ${DIFF_CAP} character limit and there is no checkout; tried again later`); return; }
+        await hold("too-large", `the PR diff is over the ${DIFF_CAP} character limit`);
+        return;
+      }
+      // The model and the patch check read the same diff, within both their limits.
+      const modelDiff = checkout ? checkoutDiff(diff.text, new Set(c.fixes.map((f) => f.file)), Math.min(DIFF_CAP, CHECK_DIFF_CAP)) : diff.text;
       const repoDir = checkout ? { repo_dir: REPO_PATH } : {};
       const quiet = (await loadQuiet(db, [`${repo}#${c.number}`])).size > 0;
       const shown: FixupPr["files"] = [];
@@ -450,7 +459,7 @@ async function runFixupWith(db: Db, params: FixupParams, log: (line: string) => 
       // The model's patch: the stored one when it is clean, else a new answer (with the findings on the earlier patch).
       const ses: SessionAsk = c.lint && findings.length ? sessionAsk(c.lint.session, "", findings, new Date(at())) : {};
       if (folded !== null) dropSessions(c.lint!.session);
-      const raw = folded !== null ? c.lint!.patch : await d.ask(db, [{ ref, title: titleOf(c), fixes: c.fixes, ...(quiet ? { quiet } : {}), files: shown, diff: diff.text, ...(c.operator ? { operator: c.operator.instructions } : {}),
+      const raw = folded !== null ? c.lint!.patch : await d.ask(db, [{ ref, title: titleOf(c), fixes: c.fixes, ...(quiet ? { quiet } : {}), files: shown, diff: modelDiff, ...(c.operator ? { operator: c.operator.instructions } : {}),
         ...(c.lint && findings.length ? { previous: { patch: c.lint.patch, findings } } : {}), ...repoDir }], checkout,
         new CheckTool({ db, step: "fixup", repo, number: c.number, head, base: pr.baseRefOid ?? null, applies: applyCheck(git, d.root, head, (p) => refusal(c.operator ? validatePatch(splitChanges(p).diff, null, (x) => operatorEditable(x, scripts)) : validatePatch(p, files, (x) => fixupEditable(x, scripts)))) }), ses);
       ledger.hold(ses.kept);
@@ -486,7 +495,7 @@ async function runFixupWith(db: Db, params: FixupParams, log: (line: string) => 
       // Opus checks the validated patch; only an approve goes on. A stored patch that came back clean was checked already (the format changes are whitespace only).
       if (folded === null) {
         if (v.patch.length > CHECK_PATCH_CAP) { await fail("refused", `the patch is over the ${CHECK_PATCH_CAP} character limit for the check`); return; }
-        const checkReply = await d.check(db, [{ ref, title: titleOf(c), review_reason: c.reason, fixes: c.fixes, ...(c.operator ? { operator: c.operator.instructions } : {}), diff: diff.text.slice(0, CHECK_DIFF_CAP), patch: v.patch, ...repoDir }], checkout);
+        const checkReply = await d.check(db, [{ ref, title: titleOf(c), review_reason: c.reason, fixes: c.fixes, ...(c.operator ? { operator: c.operator.instructions } : {}), diff: modelDiff.slice(0, CHECK_DIFF_CAP), patch: v.patch, ...repoDir }], checkout);
         if (checkReply === null) { await fail("failed", "the patch check gave no answer"); return; }
         const verdict = parseCheck(checkReply);
         if (!verdict.ok) { await fail("failed", `the patch check gave no valid answer: ${verdict.error}`); return; }

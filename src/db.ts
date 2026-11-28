@@ -22,6 +22,7 @@ import { splitStageTripsSqlite } from "./db/trip-split.ts";
 import { retireFixAttemptsSqlite } from "./db/fix-retire.ts";
 import { featuresRepoOnlySqlite } from "./db/feature-repo-only.ts";
 import { pingsSettledSqlite } from "./db/pings-settled.ts";
+import { fixupDiffHeldSqlite } from "./db/fixup-diff-held.ts";
 import { holdsToItemsSqlite } from "./db/holds-to-items.ts";
 import { backfillRefusalsSqlite } from "./db/refused-runs.ts";
 import { backfillRunTokensSqlite } from "./db/run-tokens.ts";
@@ -516,7 +517,7 @@ export const HISTORY_COPY_SQL = `INSERT INTO main.opus_review_history (repo, num
   WHERE NOT EXISTS (SELECT 1 FROM main.opus_review_history h WHERE h.repo = o.repo AND h.number = o.number AND h.head_oid = o.head_oid AND h.at = o.at)`;
 
 // Bump when migrateValues() or backfill() change what they do.
-const MIGRATION_VERSION = 24;
+const MIGRATION_VERSION = 25;
 
 // Rows written before their column existed.
 function backfill(db: DatabaseSync): void {
@@ -564,6 +565,7 @@ function backfill(db: DatabaseSync): void {
   backfillRunTokensSqlite(db);
   chatBackfillSqlite(db);
   pingsSettledSqlite(db);
+  fixupDiffHeldSqlite(db);
   // Reviews made before snapshots existed count as having read everything up to now: no wave of re-reviews.
   const now = new Date().toISOString();
   db.prepare("UPDATE main.opus_reviews SET seen_at = ? WHERE seen_at IS NULL").run(now);

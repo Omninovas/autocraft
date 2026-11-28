@@ -4,7 +4,7 @@
 // row click opens the item beside the list (`open=<repo>/<n>`). People who may send commands tick items, which brings up the
 // command bar at the bottom; the ticks are the command's items, kept across pages and searches, and the bar takes only the
 // command's words. The command runs for each item on its own.
-import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type Ref, type RefObject } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { CaretDownIcon, ChatCircleIcon, CheckCircleIcon, CircleDashedIcon, DiscordLogoIcon, FunnelIcon, GitPullRequestIcon, RadioButtonIcon, UsersThreeIcon, XCircleIcon, XIcon } from "@phosphor-icons/react";
 import { t } from "../../../../../src/i18n/index.ts";
@@ -35,6 +35,7 @@ import { SearchField } from "../../../ui/molecules/SearchField";
 import { Segmented } from "../../../ui/molecules/Segmented";
 import { cn } from "../../../ui/cn";
 import type { ViewProps } from "../../../registry/types";
+import { OPEN_PARAM, openItemAttrs, parseOpenItem, useOpenItem } from "./openItem";
 
 const PAGE = 50;
 /** Items in one command, as the server takes them (src/dash/api/commands.ts). */
@@ -62,7 +63,7 @@ function legacyQuery(p: URLSearchParams): string | null {
 /** Search parameters as text, with `:`, `,` and `/` left readable: `?q=is:open+label:bug&open=photocraft/12`. */
 const readable = (p: URLSearchParams) => p.toString().replace(/%3A/gi, ":").replace(/%2C/gi, ",").replace(/%2F/gi, "/");
 
-/** The query, page and opened item in the URL. Other parameters (`repo`) stay. */
+/** The query, page and opened item in the URL. Other parameters (`repo`, `open`) stay. */
 function useBrowseUrl() {
   const loc = useLocation();
   const navigate = useNavigate();
@@ -70,7 +71,6 @@ function useBrowseUrl() {
   const q = params.get("q") ?? legacyQuery(params) ?? DEFAULT_QUERY;
   const offset = Math.max(0, Number(params.get("offset")) || 0);
   const meaning = params.get("by") === "meaning";
-  const opened = params.get("open") ?? "";
   const write = (next: URLSearchParams) => {
     const search = readable(next);
     navigate({ pathname: loc.pathname, search: search ? `?${search}` : "" });
@@ -86,13 +86,7 @@ function useBrowseUrl() {
     if (no) p.set("offset", String(no));
     write(p);
   };
-  /** Opens `repo#n` beside the list (`open=<repo>/<n>`). */
-  const open = (ref: string) => {
-    const p = new URLSearchParams(loc.search);
-    p.set("open", ref.replace("#", "/"));
-    write(p);
-  };
-  return { q, offset, meaning, opened, go, open };
+  return { q, offset, meaning, opened: parseOpenItem(params.get(OPEN_PARAM)), go };
 }
 
 const AUTOCRAFT_WORD: Record<BrowseAutocraft, { label: string; tone: Tone } | null> = {
@@ -147,7 +141,7 @@ function SelectAll({ refs, picked, onPick, boxRef }: { refs: string[]; picked: R
 }
 
 /** Line 2 of a row: AutoCraft's state and markers, then size, CI, counts and the linked item, then the labels. */
-function Facts({ r }: { r: BrowseRow }) {
+function Facts({ r, children }: { r: BrowseRow; children?: ReactNode }) {
   const word = AUTOCRAFT_WORD[r.autocraft];
   const size = r.size ? t("Size {s}", { s: r.size }) : "";
   return (
@@ -199,47 +193,65 @@ function Facts({ r }: { r: BrowseRow }) {
           <span className="sr-only"> {t("labels")}</span>
         </span>
       )}
+      {children}
     </div>
   );
 }
 
+/** The author, a team icon for authors on the team, and the time. */
+function Who({ r, byCreated, className }: { r: BrowseRow; byCreated: boolean; className?: string }) {
+  return (
+    <span className={cn("flex items-center gap-1 whitespace-nowrap", className)}>
+      {r.author && <span className="max-w-[10rem] truncate">{r.author}</span>}
+      {r.team && (
+        <span role="img" aria-label={t("On the team")} title={t("On the team")} className="relative z-10 inline-flex text-accent-ink">
+          <UsersThreeIcon weight="bold" />
+        </span>
+      )}
+      {r.author && <span aria-hidden>·</span>}
+      {byCreated && <span>{t("opened")}</span>}
+      <TimeAgo iso={byCreated ? r.createdAt : r.updatedAt} className="relative z-10" />
+    </span>
+  );
+}
+
 function Row({ r, opened, byCreated, picking, picked, may, onPick, onOpen }: {
-  r: BrowseRow; opened: boolean; byCreated: boolean; picking: boolean; picked: boolean; may: boolean; onPick: (on: boolean) => void; onOpen: (() => void) | null;
+  r: BrowseRow; opened: boolean; byCreated: boolean; picking: boolean; picked: boolean; may: boolean; onPick: (on: boolean) => void; onOpen: ((keyboard: boolean) => void) | null;
 }) {
-  // On desktop a click on the row, away from its links and tick box, opens the item beside the list; on phones the item link covers the row.
+  // On desktop the row itself takes the focus: a click on it, away from its links and tick box, or Enter on it opens the item
+  // beside the list. On phones the item link covers the row.
   const click = (e: MouseEvent<HTMLLIElement>) => {
     if (!onOpen || (e.target as HTMLElement).closest("a, button, input, label, select, textarea") || window.getSelection()?.toString()) return;
-    onOpen();
+    onOpen(false);
+  };
+  const key = (e: KeyboardEvent<HTMLLIElement>) => {
+    if (!onOpen || e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    onOpen(true);
   };
   return (
     <li
       className={cn(
         "relative flex items-start gap-2 px-3 py-2 hover:bg-ink/[0.025] md:py-1.5",
-        onOpen && "cursor-pointer",
+        onOpen && "cursor-pointer outline-offset-[-2px]",
         opened && "bg-accent/[0.08] before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-accent hover:bg-accent/[0.1]",
       )}
       aria-current={opened ? "true" : undefined}
       data-row={refOf(r)}
       onClick={click}
+      {...(onOpen && { tabIndex: 0, "aria-label": `${refOf(r)} ${r.title}`, onKeyDown: key, ...openItemAttrs(r.repo, r.number) })}
     >
       {picking && <Tick label={t("Select {ref}", { ref: refOf(r) })} checked={picked} disabled={!may} onChange={onPick} />}
       <div className="min-w-0 flex-1">
         <ItemRef repo={r.repo} number={r.number} kind={r.kind} state={r.state} draft={r.draft} title={r.title} github={false} stretch="phone" />
-        <Facts r={r} />
+        {/* On phones the author and time end line 2, so the title keeps the row's width. */}
+        <Facts r={r}>
+          <Who r={r} byCreated={byCreated} className="ml-auto md:hidden" />
+        </Facts>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1.5 pt-0.5 text-xs text-ink/70">
         <GithubButton href={githubItemUrl(r.repo, r.number, r.kind)} label={t("Open {ref} on GitHub", { ref: refOf(r) })} />
-        <span className="flex items-center gap-1 whitespace-nowrap">
-          {r.author && <span className="max-w-[7.5rem] truncate md:max-w-[10rem]">{r.author}</span>}
-          {r.team && (
-            <span role="img" aria-label={t("On the team")} title={t("On the team")} className="relative z-10 inline-flex text-accent-ink">
-              <UsersThreeIcon weight="bold" />
-            </span>
-          )}
-          {r.author && <span aria-hidden>·</span>}
-          {byCreated && <span>{t("opened")}</span>}
-          <TimeAgo iso={byCreated ? r.createdAt : r.updatedAt} className="relative z-10" />
-        </span>
+        <Who r={r} byCreated={byCreated} className="max-md:hidden" />
       </div>
     </li>
   );
@@ -447,8 +459,8 @@ function CommandBar({ text, setText, items, onClear, onDone, reply, onCloseReply
 }
 
 /**
- * Arrow keys, j/k, Home and End move the focus between the rows' item links, or between their tick boxes from a tick box; `p` opens
- * the focused row beside the list.
+ * Arrow keys, j/k, Home and End move the focus between the rows (on desktop) or their item links (on phones), or between their tick
+ * boxes from a tick box; `p` opens the focused row beside the list.
  */
 function listKey(e: KeyboardEvent<HTMLUListElement>, open: ((ref: string) => void) | null) {
   const target = e.target as HTMLElement;
@@ -460,8 +472,8 @@ function listKey(e: KeyboardEvent<HTMLUListElement>, open: ((ref: string) => voi
     open(row.dataset.row!);
     return;
   }
-  // Each row's first link is its item link (ItemRef); a row whose tick box is disabled takes the focus on its link.
-  const links = [...e.currentTarget.querySelectorAll<HTMLLIElement>("li[data-row]")].flatMap((li) => (tick ? li.querySelector<HTMLElement>("input[type=checkbox]:enabled") : null) ?? li.querySelector("a") ?? []);
+  // Each row's first link is its item link (ItemRef); a row whose tick box is disabled takes the focus on the row or its link.
+  const links = [...e.currentTarget.querySelectorAll<HTMLLIElement>("li[data-row]")].flatMap((li) => (tick ? li.querySelector<HTMLElement>("input[type=checkbox]:enabled") : null) ?? (open ? li : li.querySelector("a")) ?? []);
   const at = links.findIndex((a) => a.closest("li")?.contains(document.activeElement));
   const to = e.key === "ArrowDown" || e.key === "j" ? at + 1 : e.key === "ArrowUp" || e.key === "k" ? at - 1 : e.key === "Home" ? 0 : e.key === "End" ? links.length - 1 : null;
   if (to === null || !links.length) return;
@@ -530,7 +542,8 @@ export function ItemsView(_: ViewProps) {
   const active = activeFilters(url.q);
 
   // `open=<repo>/<n>`: the item shown beside the list on desktop.
-  const openRow = phone ? null : url.open;
+  const openItem = useOpenItem();
+  const openRow = phone ? null : (ref: string, keyboard = true) => openItem(ref.slice(0, ref.lastIndexOf("#")), Number(ref.slice(ref.lastIndexOf("#") + 1)), { keyboard });
 
   // Text that names items becomes the list of exactly those items; a bare #n names an item only on a page scoped to one repo.
   const paste = (e: ClipboardEvent<HTMLInputElement>) => {
@@ -613,7 +626,7 @@ export function ItemsView(_: ViewProps) {
             </div>
           )}
 
-          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0" role="group" aria-label={t("Views")}>
+          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:thin] md:-mx-6 md:px-6" role="group" aria-label={t("Views")}>
             {PRESETS.map((p) => (
               <Chip key={p.id} ref={preset?.id === p.id ? activeChip : undefined} active={preset?.id === p.id} className="shrink-0 max-md:h-11" count={counts?.presets ? num(counts.presets[p.id] ?? 0) : undefined} onClick={() => set(p.query)}>
                 {t(p.label)}
@@ -645,13 +658,13 @@ export function ItemsView(_: ViewProps) {
                   <Row
                     key={refOf(r)}
                     r={r}
-                    opened={!phone && url.opened === `${r.repo}/${r.number}`}
+                    opened={!phone && !!url.opened && url.opened.repo === r.repo && url.opened.number === r.number}
                     byCreated={byCreated}
                     picking={writes}
                     picked={picked.has(refOf(r))}
                     may={user.runRepos.includes(r.repo)}
                     onPick={(on) => pick([refOf(r)], on)}
-                    onOpen={openRow && (() => openRow(refOf(r)))}
+                    onOpen={openRow && ((keyboard) => openRow(refOf(r), keyboard))}
                   />
                 ))}
               </ul>

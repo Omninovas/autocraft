@@ -288,18 +288,20 @@ export async function moveFixupRequests(db: Db, rows: FixupRequestMove[]): Promi
 }
 
 /** Compare-and-set update where `state = 'queued'`: ends the requests and audits each as `operator-fixup` with its reason. Returns the ids ended. */
-/** Rewrites the instructions of queued fix-up requests (parts a person dropped come out); returns the ids rewritten. */
-export async function setFixupInstructions(db: Db, rows: { id: number; instructions: string }[]): Promise<number[]> {
-  if (rows.length === 0) return [];
+/** Whether a fix-up was ever asked for at the PR's head, in any state. */
+export async function hasFixupRequestAt(db: Db, repo: string, number: number, head: string): Promise<boolean> {
   const q = queryDb(db);
   const k = q.k as any;
-  return await db.write(async () => {
-    const done: number[] = [];
-    for (const r of rows) {
-      const got = await q.all(k.updateTable("main.operator_fixups").set({ instructions: r.instructions }).where("id", "=", r.id).where("state", "=", "queued").returning(["id"])) as { id: number }[];
-      if (got.length) done.push(r.id);
-    }
-    return done;
+  return !!(await q.get(k.selectFrom("main.operator_fixups").select("id").where("repo", "=", repo).where("number", "=", number).where("from_head", "=", head).limit(1)));
+}
+
+/** Links the merge leg to the fix-up request that takes the place of its earlier one. */
+export async function relinkLegFix(db: Db, legId: number, fixId: number): Promise<void> {
+  const q = queryDb(db);
+  const k = q.k as any;
+  await db.write(async () => {
+    await q.run(k.updateTable("main.preapprovals").set({ fix_id: fixId }).where("id", "=", legId));
+    await q.run(k.updateTable("main.operator_fixups").set({ preapproval_id: legId }).where("id", "=", fixId));
   });
 }
 

@@ -27,9 +27,9 @@ export function attemptsIn(rows: readonly FixupRow[], since?: string): number {
   return rows.filter((r) => r.source === null && FIXUP_TRY_STATES.includes(r.state) && (since === undefined || r.createdAt > since)
     && !(r.state === "refused" && FORMAT_REASONS.some((f) => (r.reason ?? "").toLowerCase().startsWith(f)))).length;
 }
-/** `source = 'operator'` rows in try states. */
-export function operatorTriesIn(rows: readonly FixupRow[]): number {
-  return rows.filter((r) => r.source === "operator" && FIXUP_TRY_STATES.includes(r.state)).length;
+/** `source = 'operator'` rows in try states, after `since` when given (on a PR approved for merge: since its person last went on with it). */
+export function operatorTriesIn(rows: readonly FixupRow[], since?: string): number {
+  return rows.filter((r) => r.source === "operator" && FIXUP_TRY_STATES.includes(r.state) && (since === undefined || r.createdAt > since)).length;
 }
 /** Pre-merge fix rounds the PR has had (rows with source premerge, pushed or not). */
 export function premergeFixRoundsIn(rows: readonly FixupRow[]): number {

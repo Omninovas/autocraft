@@ -201,8 +201,8 @@ export const beyondPlanned = (files: readonly string[], planned: readonly string
 
 /** The first line of a fix-up request that names parts of the plan and nothing else (src/workflow/effects.ts fixInstructions). */
 export const PARTS_ONLY = "Fix these findings of the review, and nothing else:";
-/** A part's line in a fix-up request. */
-export const partLine = (p: { n: number; title: string; file?: string | null }): string => `${p.n}. ${p.title}${p.file ? ` (${p.file})` : ""}`;
+/** A part's line in a fix-up request. A title that ends in parentheses and names no file gets empty ones, so its own are not read as a file. */
+export const partLine = (p: { n: number; title: string; file?: string | null }): string => `${p.n}. ${p.title}${p.file ? ` (${p.file})` : p.title.endsWith(")") ? " ()" : ""}`;
 
 /**
  * The parts a fix-up request names, when it names parts of the plan and nothing else: their titles and files. Null for a request with a
@@ -213,9 +213,9 @@ export function askedParts(instructions: string): { title: string; file: string 
   if (first !== PARTS_ONLY || !lines.length) return null;
   const out: { title: string; file: string | null }[] = [];
   for (const l of lines) {
-    const m = /^\d+\. (.+?)(?: \(([^()]+)\))?$/.exec(l);
+    const m = /^\d+\. (.+?)(?: \(([^()]*)\))?$/.exec(l);
     if (!m) return null;
-    out.push({ title: m[1]!, file: m[2] ?? null });
+    out.push({ title: m[1]!, file: m[2] || null });
   }
   return out;
 }

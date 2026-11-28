@@ -27,7 +27,7 @@ import { openQuestion } from "../src/implement/questions.ts";
 import { recordSteps, startAttempt } from "../src/data/implement/index.ts";
 import { applyStuckAnswer, markStuck } from "../src/implement/stuck.ts";
 import { resumeRetiredStops } from "../src/workflow/retired-stops.ts";
-import { actor, approvedReview, asked, ASKS, fixup, implementationOpened, implementIssue, keep, labelOf, later, leg8, legState, MAINT, nextStep, ownPush, review, review8, say } from "./workflow-advance-world.ts";
+import { actor, approvedReview, asked, ASKS, fixup, implementationOpened, implementIssue, keep, labelOf, later, leg8, legState, MAINT, nextStep, ownPush, pause, review, review8, say } from "./workflow-advance-world.ts";
 
 test("each blocker stops an approved item and keeps its approval", async () => {
   const cases: [Blocker, (w: World) => Promise<unknown>][] = [
@@ -122,6 +122,55 @@ test("an approved PR whose review has a major finding, or says hold, gets a fix-
     assert.ok((await w.prPlan(1)).actions.some((a) => a.kind === "merge"), "the merge queue merges it");
     w.close();
   }
+});
+
+test("a hold the fix-ups do not resolve asks, after the tries, whether to merge it as it is; a yes merges past the review the person was shown", async () => {
+  const w = await approvedReview();
+  const db = w.db;
+  const pass = async () => { await advanceWorkflows(db); await untilQuiet(db, [() => advancePreapprovals(db)], 3); await advanceWorkflows(db); };
+  const hold = (head: string) => review(w, { head, verdict: "hold", at: new Date().toISOString() });
+  // The fix-up asked for at `from` pushes `to`, which the review holds again.
+  const pushes = async (from: string, to: string) => {
+    const [req] = await w.rows("SELECT id FROM operator_fixups WHERE number = 1 AND from_head = ?", from);
+    assert.ok(req, `a fix-up is asked for at ${from}`);
+    await db.run(db.k.insertInto("main.fixups").values({ repo: "app", number: 1, from_head: from, to_head: to, state: "pushed", reason: null, files: "[]", attempt: 1, created_at: new Date().toISOString(), source: "operator", operator_fix: Number(req!.id) }));
+    await db.run(db.k.insertInto("main.push_outcomes").values({ at: new Date().toISOString(), stage: "fixup", action: "fixup-push", repo: "app", number: 1, from_oid: from, to_oid: to, before_res: "green" }));
+    await w.synced(1, to);
+    await pass();
+    await pause();
+    await hold(to);
+    await pass();
+  };
+  await hold("sha1");
+  await pass();
+  await pushes("sha1", "sha2");
+  assert.deepEqual([(await liveWorkflow(db, "app", 1))!.state, (await liveWorkflow(db, "app", 1))!.rec], ["running", null], "the second hold gets its fix-up too");
+  await pushes("sha2", "sha3");
+  const asked = (await liveWorkflow(db, "app", 1))!;
+  assert.deepEqual([asked.state, asked.blocker, asked.approvedBy], ["blocked", "failed-twice", MAINT]);
+  assert.match(asked.rec!.text, /could not fix .* after 2 tries\. Merge it as it is\?/);
+  assert.equal((await w.rows("SELECT id FROM operator_fixups WHERE number = 1 AND from_head = 'sha3'")).length, 0, "no third try");
+
+  await pause();
+  const r = await runCommand(db, actor, "dashboard", { parsed: parse("yes"), items: [{ repo: "app", number: 1 }] });
+  assert.equal(r.items[0]!.outcome, "run", r.lines.join("\n"));
+  await pass();
+  assert.deepEqual([(await liveWorkflow(db, "app", 1))!.state, await legState(w)], ["running", "ci"], "the leg goes past the hold the person was shown");
+  await (await w.premerge(1, "clean")).verified(1);
+  await pass();
+  assert.equal(await legState(w), "queued");
+});
+
+test("a hold written without a model call on an approved PR stops it at once as other, with no fix-up", async () => {
+  const w = await approvedReview();
+  await review(w, { head: "sha1", verdict: "hold", at: new Date().toISOString() });
+  await w.db.run(w.db.k.updateTable("main.opus_reviews").set({ model: null, reason: "too large" }).where("number", "=", 1));
+  await advanceWorkflows(w.db);
+  await untilQuiet(w.db, [() => advancePreapprovals(w.db)], 3);
+  await advanceWorkflows(w.db);
+  const wf = (await liveWorkflow(w.db, "app", 1))!;
+  assert.deepEqual([wf.state, wf.blocker], ["blocked", "other"]);
+  assert.deepEqual(await w.rows("SELECT id FROM operator_fixups WHERE number = 1"), []);
 });
 
 test("a lasting refusal after the hand-over asks once, and a yes goes on past it; a failed verification gets a fix-up instead", async () => {

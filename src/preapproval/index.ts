@@ -54,7 +54,7 @@ import { permKey, standings, type Standing } from "../data/access/index.ts";
 import { githubIdentity } from "../github/identity.ts";
 import { addTurns } from "../data/conversations/index.ts";
 import {
-  addFixupRequests, addLegs, adoptLegs, endFixupRequests, listWorkflows, loadFixupRequests, loadLegPass, loadLegs, loadWorkflowFacts, moveFixupRequests, moveLegs, setFixupInstructions,
+  addFixupRequests, addLegs, adoptLegs, endFixupRequests, listWorkflows, loadFixupRequests, loadLegPass, loadLegs, loadWorkflowFacts, moveFixupRequests, moveLegs, relinkLegFix,
   type LegContext, type LegMove, type LegPass, type LegRow, type LegState, type WorkflowFact,
 } from "../data/workflow/index.ts";
 import type { Db } from "../db/index.ts";
@@ -163,34 +163,37 @@ export class PreapprovalRefused extends Error {
 
 /**
  * A person dropped plan parts (`titles`): the parts-only fix-up requests of the PR (src/core/evidence.ts askedParts) lose them, as the
- * person's word wins over the fix-up AutoCraft asked for. A request left with no part is withdrawn, also one whose try is under way: what it
- * made is not pushed, as its lint run takes no withdrawn request (src/fixup/select.ts). Its merge leg goes back to review at the head it was
- * at, so the merge goes on there. A request with parts left keeps them; one whose try is under way applies as it is.
+ * person's word wins over the fix-up AutoCraft asked for. A request is never changed under a try that may be reading it: it is withdrawn,
+ * and one with parts left is asked again with those, at the same head and for the same merge leg. What a withdrawn try made is not pushed
+ * (src/fixup/index.ts checks the request right before the push; its lint run takes no withdrawn request). A leg whose request is withdrawn
+ * with no part left goes back to review at the head it was at, so the merge goes on there.
  */
 export async function dropFixParts(db: Db, o: { repo: string; number: number; titles: readonly string[]; by: string }): Promise<void> {
   const dropped = new Set(o.titles.map((x) => x.toLowerCase()));
   if (!dropped.size) return;
   const requests = (await loadFixupRequests(db, { refs: [{ repo: o.repo, number: o.number }], anyMaker: true })).filter((r) => r.state === "queued");
-  const tried = await loadOperatorFixResults(db, requests.map((r) => r.id));
-  const ends: { id: number; reason: string }[] = [], rewrites: { id: number; instructions: string }[] = [];
+  const changed: { id: number; by: string; head: string; instructions: string | null }[] = [];
   for (const r of requests) {
     const parts = askedParts(r.instructions);
     if (!parts) continue;
-    const left = parts.filter((p) => !dropped.has(p.title.toLowerCase()));
-    if (left.length === parts.length) continue;
-    if (!left.length) ends.push({ id: r.id, reason: `${o.by} dropped every part it fixes` });
-    else if (!tried.has(r.id)) {
-      const [first, ...lines] = r.instructions.split("\n");
-      rewrites.push({ id: r.id, instructions: [first, ...lines.filter((_l, i) => !dropped.has(parts[i]!.title.toLowerCase()))].join("\n") });
-    }
+    const kept = parts.map((p, i) => ({ p, i })).filter(({ p }) => !dropped.has(p.title.toLowerCase()));
+    if (kept.length === parts.length) continue;
+    const [first, ...lines] = r.instructions.split("\n");
+    changed.push({ id: r.id, by: r.by, head: r.from_head, instructions: kept.length ? [first, ...kept.map(({ i }) => lines[i]!)].join("\n") : null });
   }
-  if (!ends.length && !rewrites.length) return;
+  if (!changed.length) return;
   await db.write(async () => {
-    await setFixupInstructions(db, rewrites);
-    const ended = new Set(await endFixupRequests(db, ends));
-    for (const leg of (await loadLegs(db, [{ repo: o.repo, number: o.number }], { activeOnly: true })).get(refOf(o.repo, o.number)) ?? []) {
-      if (leg.state !== "fixup" || leg.fix_id === null || !ended.has(leg.fix_id)) continue;
-      await move(db, leg, "review", { head: leg.from_head, line: `${o.by} dropped every part the fix-up of ${short(leg.from_head)} was to fix: it is withdrawn, and the merge goes on at ${short(leg.from_head)}.` });
+    const ended = new Set(await endFixupRequests(db, changed.map((c) => ({ id: c.id, reason: `${o.by} dropped ${c.instructions === null ? "every part" : "parts"} it fixes` }))));
+    const legs = (await loadLegs(db, [{ repo: o.repo, number: o.number }], { activeOnly: true })).get(refOf(o.repo, o.number)) ?? [];
+    for (const c of changed) {
+      if (!ended.has(c.id)) continue;
+      const leg = legs.find((l) => l.state === "fixup" && l.fix_id === c.id);
+      if (c.instructions !== null) {
+        const made = (await addFixupRequests(db, [{ repo: o.repo, number: o.number, fromHead: c.head, instructions: c.instructions, by: c.by, merge: false }])).get(refOf(o.repo, o.number));
+        if (leg && made) await relinkLegFix(db, leg.id, made.requestId);
+      } else if (leg) {
+        await move(db, leg, "review", { head: leg.from_head, line: `${o.by} dropped every part the fix-up of ${short(leg.from_head)} was to fix: it is withdrawn, and the merge goes on at ${short(leg.from_head)}.` });
+      }
     }
   });
 }
@@ -243,7 +246,7 @@ export async function checkFixup(db: Db, o: { repo: string; number: number; by: 
   const writes = await ensureAuthorWrites(db, repo, number, it.head_repo);
   if (writes === "unknown") throw new NotYet("the author's permission on the repository could not be read yet; try again");
   if (!pushable(it.head_repo, repo, checks?.head_oid === head ? checks.maintainer_can_modify : null, it.head_ref, await longLivedOf(db, repo), false, writes === "yes")) throw new Error("can't push to the contributor's branch");
-  if (!await operatorTriesLeft(db, repo, number)) throw new Error("the fix-up tries for this PR are used up");
+  if (!await operatorTriesLeft(db, repo, number, fact.workflow?.since)) throw new Error("the fix-up tries for this PR are used up");
   if (await queuedOperatorFix(db, repo, number, head)) throw new Error(`a fix-up of ${ref} is already queued`);
   if (merge && await hasLeg(db, repo, number)) throw busy(ref);
   return {
@@ -493,7 +496,7 @@ async function whyNotPlanned(db: Db, f: PrFacts): Promise<string | null> {
   if (notStarted(f)) return "nobody started the PR";
   const refused = pushRefusal(f, "fixup", true);
   if (refused) return `the push is not approved: ${refused.replace(/\.$/, "")}`;
-  if (!await operatorTriesLeft(db, f.repo, f.number)) return "the fix-up tries are used up";
+  if (!await operatorTriesLeft(db, f.repo, f.number, f.workflow?.since)) return "the fix-up tries are used up";
   return "the pipeline does not plan the fix-up";
 }
 

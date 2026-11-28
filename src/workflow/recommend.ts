@@ -167,7 +167,8 @@ export function atBlocker(found: Found, _review: ReviewView | null, plan: readon
     }
     case "failed-twice": {
       if (p.step === "fix-up") {
-        const fix = planned(plan);
+        // Minor parts are filed as follow-ups on an approved PR, never fixed (ask.ts withoutFixes).
+        const fix = planned(plan).filter((n) => !plan.find((x) => x.n === n)?.minor);
         const why = typeof p.reason === "string" && p.reason ? `${asSentence(clipText(p.reason, FINDING_CHARS))} ` : "";
         return fix.length ? { text: `${why}${t("Try the fix-up of {parts} again, then merge.", { parts: listText(fix) })}`, parts: { fix, drop }, merges: true } : go(`${why}${t("Try the fix-up again, then merge.")}`, { again: "fixup" });
       }

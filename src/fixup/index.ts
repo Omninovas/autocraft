@@ -9,6 +9,7 @@
 //
 // Without --apply it is a dry run: local tables only, nothing called or written.
 // The checkout is untrusted data: nothing from it is ever run (see git.ts).
+import { queuedOperatorFix } from "../preapproval/state.ts";
 import { commitIdentity, ownLogins, type CommitIdentity } from "../github/identity.ts";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
@@ -516,6 +517,8 @@ async function runFixupWith(db: Db, params: FixupParams, log: (line: string) => 
       }
       // The planner may have released the PR while the model worked (our own unassign is no one's final word).
       await claim(c, { kind: "fixup", bucket: "fix", source: sourceOf(c) });
+      // A request withdrawn while its try ran (a person dropped what it fixes) pushes nothing.
+      if (c.operator && (await queuedOperatorFix(db, repo, c.number, c.head))?.id !== c.operator.id) { log(`  ${ref}: skipped: its fix-up request was withdrawn`); return; }
       await rec.pushing(c, commit, v.files);
       const push = await pushBranch(gw, git, "fixup-push", g, { remote: pr.headRepository.nameWithOwner, branch: pr.headRefName, sha: commit }, { run: runId, from: head, to: commit, files: v.files, changed: v.changed });
       if (push.code !== 0) {

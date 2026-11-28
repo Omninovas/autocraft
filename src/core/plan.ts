@@ -108,6 +108,8 @@ export type WorkflowFact = {
   startedAt: string;
   /** False on an implementation PR, which carries the workflow of its issue. */
   own: boolean;
+  /** When its person last went on with it (src/data/workflow/types.ts WorkflowFact); the merge approval's tries count from here. */
+  since?: string;
   /** The lower-case titles of the parts a person dropped from its plan, but the pre-merge review's findings; absent when none. */
   dropped?: string[];
   /**

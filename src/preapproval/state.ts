@@ -4,11 +4,14 @@ import { loadFixupRequests } from "../data/workflow/index.ts";
 import { loadPatchFacts, operatorTriesIn } from "../data/changes/index.ts";
 import type { Db } from "../db/index.ts";
 
-/** Tries the operator's fix-ups used on the PR; the fix-up limit of the PR applies to them as to the review's. */
-export async function operatorTries(db: Db, repo: string, number: number): Promise<number> {
-  return operatorTriesIn((await loadPatchFacts(db, [{ repo, number }])).get(`${repo}#${number}`)?.fixups ?? []);
+/**
+ * Tries the operator's fix-ups used on the PR, since `since` when given (the workflow's: when its person last went on with it); the fix-up
+ * limit of the PR applies to them as to the review's.
+ */
+export async function operatorTries(db: Db, repo: string, number: number, since?: string): Promise<number> {
+  return operatorTriesIn((await loadPatchFacts(db, [{ repo, number }])).get(`${repo}#${number}`)?.fixups ?? [], since);
 }
-export const operatorTriesLeft = async (db: Db, repo: string, number: number): Promise<boolean> => await operatorTries(db, repo, number) < FIXUP_MAX_ATTEMPTS;
+export const operatorTriesLeft = async (db: Db, repo: string, number: number, since?: string): Promise<boolean> => await operatorTries(db, repo, number, since) < FIXUP_MAX_ATTEMPTS;
 
 export type OperatorFix = { id: number; head: string; instructions: string; by: string; preapprovalId: number | null };
 

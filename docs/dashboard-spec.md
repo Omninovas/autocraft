@@ -177,6 +177,12 @@ Operators and maintainers. Besides the Pipeline switch, the GitHub writes and th
 
 Items moved per stage per hour (last 24 hours) or per day (last 7 days), with runs and failed runs, drawn as one small chart per stage; and each account's 5-hour and weekly use over time as lines on a 0 to 100 % scale with each window's pause level marked. A table view gives the stage totals as text. The charts redraw to the container width and stay readable at 390 px.
 
+### Help (`/help`)
+
+Short pages on using AutoCraft, open to everyone. The first, **Get started** (`/help/tutorial`), walks a new maintainer through seven steps, each a few sentences with links to its reference page: what AutoCraft does with a command and a merge approval; connecting a Task Runner (Claude or Codex: `autocraft login`, `autocraft harness`, `autocraft doctor`, `autocraft service install`, and the My settings that decide what it takes); linking Discord (with the Link Discord button); sending a command, drawn on a code-host thread, a chat channel, the Items command box and an item's chat, with replies made by the workflow's own parser and confirmation (`src/workflow/parse.ts`, `resolve.ts`, `status.ts`); asking the model about an item; following the work (Home, Items qualifiers, Work queue, Agents and the model call queue); and connecting one's own agent through the MCP Connector. The drawn surfaces use the theme's tokens and no other product's logo, colours or wording. For maintainers and operators, the Task Runner and Discord steps carry a Done or Not done yet mark: a Task Runner of theirs is fresh and ready; their Discord account is linked (left out when the server has no Discord bot).
+
+While one of those steps is not done, maintainers and operators see a slim bar under the top bar on every page except Get started: "Finish setting up AutoCraft · 1 of 2 done", a Get started link and Dismiss. It appears once the checks have loaded and stays in place across navigation; a live region announces it once. Dismiss hides it for good for that person (`setupDismissed` in `PUT /api/me/settings`, stored in `user_settings`); Get started stays in Help. Viewers never see it.
+
 ## Behaviour
 
 - Writes (answers, overrides, settings, access) go through POST endpoints that check the reader's permission, validate input and write one row plus one audit row; each records the signed-in reader's GitHub login.

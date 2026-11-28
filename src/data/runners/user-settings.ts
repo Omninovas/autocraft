@@ -138,3 +138,27 @@ export async function saveUserSettings(db: Db, login: string, patch: Partial<Use
     return next;
   });
 }
+
+/** The key of the setup banner's dismissal: a dashboard preference, not a Task Runner setting, so `USER_SETTING_KEYS` leaves it out. */
+const SETUP_DISMISSED = "setup_dismissed";
+
+/** Whether the login dismissed the dashboard's setup banner. */
+export async function loadSetupDismissed(db: Db, login: string): Promise<boolean> {
+  const q = queryDb(db);
+  const row = await q.get(q.k.selectFrom("main.user_settings").select("value").where("key", "=", SETUP_DISMISSED)
+    .where((eb) => kx.inList(db, eb.fn<string>("lower", ["login"]), [login.toLowerCase()])));
+  return row?.value === "1";
+}
+
+/** Stores the dismissal (false removes the row). Not audited: it changes only what the person's own pages show. */
+export async function saveSetupDismissed(db: Db, login: string, on: boolean): Promise<void> {
+  const q = queryDb(db);
+  await db.write(async () => {
+    if (!on) {
+      await q.run(q.k.deleteFrom("main.user_settings").where("login", "=", login).where("key", "=", SETUP_DISMISSED));
+      return;
+    }
+    await q.run(q.k.insertInto("main.user_settings").values({ login, key: SETUP_DISMISSED, value: "1", updated_at: new Date().toISOString() })
+      .onConflict((oc) => oc.columns(["login", "key"]).doUpdateSet(kx.excluded(["value", "updated_at"]))));
+  });
+}

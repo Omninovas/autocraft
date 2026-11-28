@@ -66,7 +66,8 @@ export function createMockApi(): Api {
   const me: User = MOCK_USERS[mockRole()];
   const listeners = new Set<() => void>();
   const changed = () => listeners.forEach((fn) => fn());
-  let discordLinked = true;
+  // `?discord=unlinked` starts without a linked account, for screenshots of the setup steps.
+  let discordLinked = new URLSearchParams(location.search).get("discord") !== "unlinked";
   const discord: DiscordSetup = {
     state: "connected", detail: null, at: nowIso(), repos: ["photocraft", "pdfcraft", "wordcraft"],
     offer: {

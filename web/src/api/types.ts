@@ -2219,8 +2219,9 @@ export type { HelperInfo as RemoteHelper, Readiness as HelperReadiness, UsageWin
  * the runners' labels, slots or models.
  */
 export type TaskItems = "all" | "started" | "mine";
-export type MySettings = UserSettingsReply & { manualOnly: boolean; tasks: string[]; taskChoices: { id: string; title: string; about: string; models: string[] }[]; taskItems: TaskItems; runnerPrivate: boolean; };
-export type MySettingsChange = UserSettings & { manualOnly: boolean; tasks: string[]; taskItems: TaskItems; runnerPrivate: boolean; };
+/** `setupDismissed`: the person dismissed the setup banner (web/src/shell/SetupBanner.tsx). */
+export type MySettings = UserSettingsReply & { manualOnly: boolean; tasks: string[]; taskChoices: { id: string; title: string; about: string; models: string[] }[]; taskItems: TaskItems; runnerPrivate: boolean; setupDismissed: boolean; };
+export type MySettingsChange = UserSettings & { manualOnly: boolean; tasks: string[]; taskItems: TaskItems; runnerPrivate: boolean; setupDismissed: boolean; };
 
 /** Why a queued model call waits, most specific first: picked by a user; waiting for the runner that holds its session; no runner ready for its tier; every ready runner is Manual only; every runner that may take it is busy; no ready runner's user can take calls on its repo; calls ahead of it. */
 export type ModelQueueWhyCode = "picked" | "session" | "bound" | "bound-off" | "owner" | "owner-off" | "login" | "no-runner" | "manual-only" | "busy" | "no-repo-access" | "task-off" | "items-off" | "behind";

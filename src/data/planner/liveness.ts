@@ -79,6 +79,17 @@ export async function loadLiveness(db: Db): Promise<Liveness | null> {
   return { checkedAt: state.checked_at, stuck: list.filter((i) => i.verdict === "stuck").length, long: list.filter((i) => i.verdict === "long").length, open: Number(state.open ?? 0), causes, items: list };
 }
 
+/** The liveness rows of `keys`, by ref: verdict, cause, the plan's wait and since when it stands. 1 statement per 10,000 keys. */
+export async function loadLivenessOf(db: Db, keys: RefKey[]): Promise<Map<RefKey, Pick<LivenessItem, "verdict" | "cause" | "wait" | "since">>> {
+  const out = new Map<RefKey, Pick<LivenessItem, "verdict" | "cause" | "wait" | "since">>();
+  const q = queryDb(db);
+  for (const chunk of kx.chunks(keys)) {
+    for (const r of await q.all(q.k.selectFrom("main.liveness_items as li").select(["li.repo", "li.number", "li.verdict", "li.cause", "li.wait", "li.since"]).where(kx.refIn(db, "li", chunk))
+      .$narrowType<{ verdict: LivenessVerdict }>())) out.set(`${r.repo}#${r.number}`, { verdict: r.verdict, cause: r.cause, wait: r.wait, since: r.since });
+  }
+  return out;
+}
+
 /** The refs among `keys` with verdict `stuck`. 1 statement per 10,000 keys. */
 export async function loadStuck(db: Db, keys: RefKey[]): Promise<Set<RefKey>> {
   const out = new Set<RefKey>();

@@ -57,12 +57,12 @@ Done counts and trends start at `settings.tracking_started_at`, set when the dat
 
 | Row | Opens | Action |
 |---|---|---|
-| A step stopped by its breaker ("Merge queued pull requests in texturecraft", with the reason) | The items the breaker's evidence names in Items (`items:` term); one item opens beside the list (`open=`), so a post-merge review's defect shows in its chat. The outside-surge breaker opens `is:outside-held`; a trip that names no item, the Work queue | Resume, for an operator, or a maintainer with write access to the breaker's repo (instance-wide breakers: operators) |
+| A step stopped by its breaker ("Merge queued pull requests in texturecraft", with the reason) | The items the breaker's evidence names in Items (`items:` term); one item opens beside the list (`open=`), so a post-merge review's defect shows in its chat. The outside-surge breaker opens `is:outside-held`; a trip that names no item, and every trip for viewers, the Work queue | Resume, for an operator, or a maintainer with write access to the breaker's repo (instance-wide breakers: operators) |
 | An outside author held at the daily limit or by the surge | Items, `is:outside-held author:<login>` | Release (operators): lets every held item of the author through |
 | A step at a daily limit of 0, the pipeline switch, runner, sync, worker and other instance checks | The page that holds the setting or the cause | none |
 | A job stopped for running past its step's limit | The job | Acknowledge (operators) |
 | The GitHub App installed on an account that may not use it | GitHub App settings | Acknowledge (operators) |
-| Open items stuck (nothing is due and nobody is asked), or unchanged for days | Items, `is:stuck` or `is:stale` | none |
+| Open items stuck (nothing is due and nobody is asked), or unchanged for days | Items, `is:stuck` or `is:stale` (viewers: Items) | none |
 | An item whose workflow cannot be checked, whose CI fix gave up, or that was not closed | The item beside the Items list | none: the item's chat takes the command |
 | A security finding whose fix gave up | The finding | none |
 
@@ -75,7 +75,7 @@ Done counts and trends start at `settings.tracking_started_at`, set when the dat
 
 ### Stats (progress)
 
-One page with the parts below and, folded, Main CI, nightly checks, Cost, Activity and Rates, Classifiers and Downloads.
+One page with the parts below and, folded, Main CI, nightly checks, Cost, Activity and Rates, Classifiers and Downloads. `/stats#<fold>` (`progress`, `main-ci`, `nightly`, `cost`, `rates`, `classifiers`, `downloads`) opens that fold.
 
 - Org totals at the top: open now, done by the pipeline since tracking began (merged / closed), closed by others, items closed per hour over the last 24 h, items waiting for an answer. Steps the pipeline hasn't reached yet say "not started yet".
 - Funnel chart for the org, then a table with one row per repo (sortable by open count, done count, waiting for an answer).
@@ -94,7 +94,7 @@ One list over every item of the visible repos, narrowed to the picked project. T
 
 | Qualifier | Values |
 |---|---|
-| `is:` | `pr`, `issue`, `open`, `closed`, `merged`, `draft` (open draft pull requests; `draft:true` is the same), `ready` (open pull requests that are not drafts; `draft:false`), `outside` (author is outside the team: not an owner, member or collaborator, nor a bot; for operators and maintainers also not an operator, maintainer or AutoCraft's own login), `mine` (I started, approved, held or answered it), `asked` (its open question is mine), `approved` (approved for merge), `duplicate`, `outside-held`; operators and maintainers also `security`, `stuck` (open, nothing is due and nobody is asked), `stale` (open and live, but its plan's state and wait have not changed for `liveness_long_days`, 7 by default; items parked by a person, waiting on an asked question or an issue waiting on its open PR do not count). Both are the liveness check's last stored result (`src/liveness.ts`) |
+| `is:` | `pr`, `issue`, `open`, `closed`, `merged`, `draft` (open draft pull requests; `draft:true` is the same), `ready` (open pull requests that are not drafts; `draft:false`), `outside` (author is outside the team: not an owner, member or collaborator, nor a bot; for operators and maintainers also not an operator, maintainer or AutoCraft's own login), `mine` (I started, approved, held or answered it), `asked` (its open question is mine), `approved` (approved for merge), `duplicate`, `outside-held`; operators and maintainers also `security`, `stuck` (open, nothing is due and nobody is asked), `stale` (open and live, but its plan's state and wait have not changed for `liveness_long_days`, 7 by default; items parked by a person, waiting on an asked question or an issue waiting on its open PR do not count). Both are the liveness check's last stored result (`src/liveness.ts`); a list filtered by either gives each row a line with the cause, what its plan waits for and since when |
 | `label:` `author:` `repo:` `area:` | names; `area:none` |
 | `priority:` | `P0`–`P4` (the rated level) |
 | `kind:` | classification: `bug`, `feature`, `perf`, `extra`, `plugin`, `infra` |
@@ -153,7 +153,7 @@ The item page shows a "Discord N" badge in its header and, in the details, a lis
 
 ### Audit (`/audit`, operators and maintainers)
 
-In the rail's Reference group. The audit log, filterable by login and action. Maintainers get only listed actions, and none for accounts or access (access changes, session revokes, sign-ins, account changes and logins); an action nobody listed stays hidden from them.
+In the rail's Reference group. A maintainer reads no row whose target names a repo they cannot see (`repo`, `repo#n`, `repo@sha`, `repo:…`, `stage:repo`), and none of the abuse protections, breaker trips or instance identity. The audit log, filterable by login and action. Maintainers get only listed actions, and none for accounts or access (access changes, session revokes, sign-ins, account changes and logins); an action nobody listed stays hidden from them.
 
 ### Cost
 

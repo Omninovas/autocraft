@@ -12,6 +12,8 @@ import { itemState } from "./shown.ts";
 import { canSeeInternals } from "./staff.ts";
 import { hiddenRepos, visibleRepos } from "./visible.ts";
 import { HttpError } from "../server/util.ts";
+import { loadLivenessOf } from "../../data/planner/index.ts";
+import { waitFor } from "./reader.ts";
 
 const LIMIT_DEFAULT = 50;
 const LIMIT_MAX = 100;
@@ -55,5 +57,14 @@ export async function browse(db: Db, req: Req): Promise<BrowseResult> {
     withPresets ? countPresets(db, scope, presets) : Promise.resolve(null),
     withPresets ? loadFacets(db, scope) : Promise.resolve(null),
   ]));
-  return { rows: page.rows.map(rowOf), total: page.total, offset, limit, unknown: query.unknown, presets: counts, facets };
+  const rows = page.rows.map(rowOf);
+  // A list of stuck or stale items says why each one is flagged, as the liveness check stored it.
+  if (staff && query.terms.some((t) => t.key === "flag" && !t.not && t.values.some((v) => v === "stuck" || v === "stale")) && rows.length) {
+    const live = await loadLivenessOf(db, rows.map((r) => `${r.repo}#${r.number}`));
+    for (const r of rows) {
+      const l = live.get(`${r.repo}#${r.number}`);
+      if (l) r.liveness = { cause: l.cause, wait: waitFor({ hidden }, l.wait), since: l.since };
+    }
+  }
+  return { rows, total: page.total, offset, limit, unknown: query.unknown, presets: counts, facets };
 }

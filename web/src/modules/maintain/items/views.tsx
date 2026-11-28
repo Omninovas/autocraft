@@ -26,6 +26,7 @@ import { Chip } from "../../../ui/atoms/Chip";
 import { GithubButton } from "../../../ui/atoms/GithubButton";
 import { Input } from "../../../ui/atoms/Input";
 import { LabelPill } from "../../../ui/atoms/LabelPill";
+import { causeText } from "../../../lib/stuck";
 import { Pending } from "../../../ui/atoms/Pending";
 import { Select } from "../../../ui/atoms/Select";
 import { TimeAgo } from "../../../ui/atoms/TimeAgo";
@@ -313,6 +314,11 @@ function Row({ r, opened, byCreated, picking, picked, may, onPick, onOpen, phone
       <div className="min-w-0 flex-1">
         <ItemRef repo={r.repo} number={r.number} kind={r.kind} state={r.state} draft={r.draft} title={r.title} github={false} stretch="phone" />
         {phone ? <PhoneFacts r={r} byCreated={byCreated} /> : <Facts r={r} />}
+        {r.liveness && (
+          <p className={cn("mt-1 text-xs text-ink/70 [overflow-wrap:anywhere]", UNDER_TITLE)}>
+            {t(causeText(r.liveness.cause))}{r.liveness.wait ? `: ${r.liveness.wait}` : ""} · {t("since")} <TimeAgo iso={r.liveness.since} className="relative z-10" />
+          </p>
+        )}
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1.5 pt-0.5 text-xs text-ink/70 max-md:hidden">
         <GithubButton href={githubItemUrl(r.repo, r.number, r.kind)} label={t("Open {ref} on GitHub", { ref: refOf(r) })} />

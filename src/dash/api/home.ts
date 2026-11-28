@@ -18,12 +18,12 @@ export type StoppedRow = { title: string; repo?: string; reason: string; to: str
 export type Reader = { role?: string; canWrite(repo: string): Promise<boolean> };
 
 /** Tripped breakers, steps at a daily limit of 0 and authors held at their limit or by a surge. */
-export async function stoppedRows(db: Db, facts: AttentionFacts["stops"], hidden: HiddenRepos, reader: Reader): Promise<StoppedRow[]> {
+export async function stoppedRows(db: Db, facts: AttentionFacts["stops"], hidden: HiddenRepos, reader: Reader & { staff: boolean }): Promise<StoppedRow[]> {
   const out: StoppedRow[] = [];
   for (const t of facts.trips) {
     const k = parseTripKey(t.stage);
     if (k && isHiddenRepo(hidden, k.repo)) continue;
-    const to = tripTarget(t, hidden);
+    const to = tripTarget(t, hidden, reader.staff);
     const action: HomeAction | undefined = await control.mayResumeTrip(db, reader, t.stage) ? { kind: "resume-breaker", key: t.stage } : undefined;
     out.push({ title: stepTitle(k?.stage ?? t.stage), ...(k ? { repo: k.repo } : {}), reason: control.blankIfHidden(t.reason, hidden) ?? "", to, ...(action && { action }) });
   }

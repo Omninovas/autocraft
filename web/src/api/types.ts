@@ -2913,6 +2913,8 @@ export interface BrowseRow {
   duplicate: boolean;
   createdAt: string;
   updatedAt: string;
+  /** Staff, on a list filtered by `is:stuck` or `is:stale`: why the liveness check flags the item, what its plan waits for and since when. */
+  liveness?: { cause: string; wait: string | null; since: string };
 }
 
 export interface BrowseQuery {

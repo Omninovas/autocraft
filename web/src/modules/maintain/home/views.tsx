@@ -1,5 +1,6 @@
 // Home: the Task Runner line, then the reader's own items (started, approved, held or asked), most recently updated first, with
 // the conversation's last line. Viewers see what waits for a maintainer.
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { CaretRightIcon, WarningCircleIcon, XCircleIcon } from "@phosphor-icons/react";
 import { t } from "../../../../../src/i18n/index.ts";
@@ -108,8 +109,8 @@ function List({ title, rows }: { title: string; rows: MaintainRow[] }) {
   );
 }
 
-/** The row's action, through the same registered control or endpoint its page uses; the reply line shows when it refuses. */
-function ProblemAction({ a }: { a: HomeAction }) {
+/** The row's action, through the same registered control or endpoint its page uses; `onDone` gets the result line. */
+function ProblemAction({ a, title, onDone }: { a: HomeAction; title: string; onDone: (line: string) => void }) {
   const api = useApi();
   const write = useWrite();
   const run = () => void write.run("go", async () => {
@@ -117,19 +118,27 @@ function ProblemAction({ a }: { a: HomeAction }) {
       case "resume-breaker": {
         const r = await api.controls.run({ control: "resume-breaker", key: a.key });
         if (!r.ok) throw new Error(r.line);
-        return;
+        return onDone(r.line);
       }
-      case "release-author": return api.pipeline.releaseAuthor(a.author);
-      case "ack-deadline": return api.pipeline.ackDeadline(a.step);
-      default: return api.githubApp.ackForeignInstalls();
+      case "release-author": {
+        const r = await api.pipeline.releaseAuthor(a.author);
+        return onDone(r.released === 1 ? t("Released 1 item of {author}.", { author: a.author }) : t("Released {n} items of {author}.", { n: r.released, author: a.author }));
+      }
+      case "ack-deadline":
+        await api.pipeline.ackDeadline(a.step);
+        return onDone(t("Acknowledged: {title}", { title }));
+      default:
+        await api.githubApp.ackForeignInstalls();
+        return onDone(t("Acknowledged: {title}", { title }));
     }
   });
   const busy = write.busy === "go";
+  const label = a.kind === "resume-breaker" ? t("Resume") : t("Acknowledge");
   return (
     <div className="relative z-10 flex shrink-0 flex-col items-end gap-1">
       {a.kind === "release-author"
-        ? <ConfirmButton idle="secondary" label={t("Release")} confirmLabel={t("Release for {author}", { author: a.author })} loading={busy} onConfirm={run} />
-        : <Button size="sm" loading={busy} onClick={run} className="max-md:h-11">{a.kind === "resume-breaker" ? t("Resume") : t("Acknowledge")}</Button>}
+        ? <ConfirmButton idle="secondary" label={t("Release")} confirmLabel={t("Release for {author}", { author: a.author })} target={title} loading={busy} onConfirm={run} />
+        : <Button size="sm" loading={busy} onClick={run} aria-label={`${label} ${title}`} className="max-md:h-11">{label}</Button>}
       <ErrorLine error={write.error} className="max-w-[16rem] text-right text-2xs" />
     </div>
   );
@@ -137,15 +146,28 @@ function ProblemAction({ a }: { a: HomeAction }) {
 
 /** Problems: stopped steps, held authors, failing checks, fixes that gave up. Each opens what it names; its action sits beside it. */
 function Attention({ rows }: { rows: HomeProblem[] }) {
-  if (!rows.length) return null;
+  const [said, setSaid] = useState("");
+  const list = useRef<HTMLUListElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  // The region stays when the last row goes, so its result is still read out.
+  const region = <p aria-live="polite" className="sr-only">{said}</p>;
+  if (!rows.length) return <>{region}</>;
   const title = t("Needs attention");
+  // After an action the result is announced and focus moves to the next row's link, or to the heading after the last row.
+  const done = (i: number) => (line: string) => {
+    setSaid(line);
+    const next = list.current?.querySelectorAll<HTMLAnchorElement>(":scope > li > div > a")[i + 1];
+    (next ?? heading.current)?.focus();
+  };
   return (
+    <>
+    {region}
     <section aria-label={title} className="flex flex-col gap-1">
-      <h2 className="mt-2 text-sm font-semibold text-ink/70">
+      <h2 ref={heading} tabIndex={-1} className="mt-2 text-sm font-semibold text-ink/70 outline-none">
         {title} <span className="num font-normal">({rows.length})</span>
       </h2>
-      <ul className="divide-y divide-line rounded-lg border border-line bg-panel">
-        {rows.map((p) => (
+      <ul ref={list} className="divide-y divide-line rounded-lg border border-line bg-panel">
+        {rows.map((p, i) => (
           <li key={`${p.kind}${p.to}${p.title}`} className="relative flex items-start gap-3 px-3 py-3 hover:bg-ink/[0.025]">
             {p.kind === "stopped" ? <XCircleIcon weight="fill" aria-label={t("Stopped")} className="mt-[3px] shrink-0 text-bad" /> : <WarningCircleIcon weight="fill" aria-label={t("Warning")} className="mt-[3px] shrink-0 text-warn" />}
             <div className="min-w-0 flex-1">
@@ -154,11 +176,12 @@ function Attention({ rows }: { rows: HomeProblem[] }) {
               </Link>
               {p.detail && <div className="mt-0.5 text-xs text-ink/70">{p.detail}</div>}
             </div>
-            {p.action ? <ProblemAction a={p.action} /> : <CaretRightIcon aria-hidden className="mt-1 shrink-0 text-ink/50" />}
+            {p.action ? <ProblemAction a={p.action} title={p.title} onDone={done(i)} /> : <CaretRightIcon aria-hidden className="mt-1 shrink-0 text-ink/50" />}
           </li>
         ))}
       </ul>
     </section>
+    </>
   );
 }
 

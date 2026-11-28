@@ -347,7 +347,7 @@ export async function loadWriteLog(db: Db, refs: string[]): Promise<Map<string, 
 
 /**
  * The admin audit log. `visible` set means a viewer who is not an operator: only `actions` are listed, and security rows
- * (`<repo>:...` targets) only of the visible repos. `q` matches the login, action or target as a substring; `before` keeps rows
+ * (`<repo>:...` targets) only of the visible repos; `hidden` leaves out every row whose target names one of those repos. `q` matches the login, action or target as a substring; `before` keeps rows
  * with a smaller rowid.
  */
 export async function listAuditPage(db: Db, f: AuditPageFilter): Promise<{ total: number; rows: AuditRow[] }> {
@@ -366,6 +366,18 @@ export async function listAuditPage(db: Db, f: AuditPageFilter): Promise<{ total
       const colon = eb.fn<number>("instr", ["target", eb.val(":")]);
       const repoOf = eb.case().when(colon, ">", 0).then(eb.fn<string>("substr", ["target", eb.lit(1), eb(colon, "-", eb.lit(1))])).else(eb.ref("target")).end();
       c.push(eb.or([eb.not(kx.like(db, "action", eb.val("security-%"))), kx.inList(db, repoOf, ["", ...(f.visible ?? [])])]));
+    }
+    if (f.hidden?.length) {
+      // A target that names a repo: the repo itself, `repo#n`, `repo@sha`, `repo:...` (security rows) or `stage:repo` (breaker keys).
+      const before = (x: Expression<string>, ch: string): Expression<string> => {
+        const at = eb.fn<number>("instr", [x, eb.val(ch)]);
+        return eb.case().when(at, ">", 0).then(eb.fn<string>("substr", [x, eb.lit(1), eb(at, "-", eb.lit(1))])).else(x).end();
+      };
+      const target = eb.ref("target") as Expression<string>;
+      const head = before(before(before(target, ":"), "#"), "@");
+      const colon = eb.fn<number>("instr", [target, eb.val(":")]);
+      const tail = before(eb.case().when(colon, ">", 0).then(eb.fn<string>("substr", [target, eb(colon, "+", eb.lit(1))])).else(eb.val("")).end(), "#");
+      c.push(eb.or([eb("target", "is", null), eb.and([eb.not(kx.inList(db, head, f.hidden)), eb.not(kx.inList(db, tail, f.hidden))])]));
     }
     return eb.and(c);
   };

@@ -23,8 +23,13 @@ import { stepTitle } from "./trace.ts";
 import { hiddenRepos } from "./visible.ts";
 import type { Db } from "../../db/index.ts";
 
-/** Where a tripped breaker's row goes: the items its evidence names (`photocraft#12`, `photocraft#12@1a2b3c4d`, `photocraft#12 attempt 2`; one opens beside the Items list), the held outside items for the surge breaker, else the Work queue. */
-export function tripTarget(trip: Pick<TripRow, "stage" | "evidence">, hidden: HiddenRepos): string {
+/**
+ * Where a tripped breaker's row goes for staff: the items its evidence names (`photocraft#12`, `photocraft#12@1a2b3c4d`,
+ * `photocraft#12 attempt 2`; one opens beside the Items list), the held outside items for the surge breaker, else the Work queue.
+ * Viewers go to the Work queue: the evidence and the held items are staff's to read.
+ */
+export function tripTarget(trip: Pick<TripRow, "stage" | "evidence">, hidden: HiddenRepos, staff: boolean): string {
+  if (!staff) return "/queue";
   const items = new Map<string, { repo: string; number: number }>();
   for (const e of trip.evidence) {
     const m = /^([\w.-]+(?:\/[\w.-]+)?)#([1-9]\d*)\b/.exec(e);
@@ -55,7 +60,8 @@ export async function healthProblems(db: Db, o: ProblemFacts): Promise<{ state: 
   if (!state.enabled) out.push({ id: "pipeline", area: "pipeline", tone: "warn", text: `Pipeline is ${state.draining ? "draining" : "off"}${state.changedBy ? `, switched ${state.draining ? "to drain" : "off"} by ${state.changedBy}` : ""}`, to: "/pipeline", since: state.changedAt });
   for (const c of checks) {
     if (c.state === "ok" || (c.repo !== undefined && isHiddenRepo(hidden, c.repo))) continue;
-    out.push({ id: c.id, area: areaOf(c.id), tone: c.state === "fail" ? "bad" : "warn", text: staff ? c.text : c.brief, to: c.to, since: c.since, ...(c.ackStep ? { ackStep: c.ackStep } : {}), ...(c.ack ? { ack: c.ack } : {}) });
+    // `is:stuck` and `is:stale` are staff's filters: a viewer's liveness warning opens the plain list.
+    out.push({ id: c.id, area: areaOf(c.id), tone: c.state === "fail" ? "bad" : "warn", text: staff ? c.text : c.brief, to: staff || c.id !== "liveness" ? c.to : "/items", since: c.since, ...(c.ackStep ? { ackStep: c.ackStep } : {}), ...(c.ack ? { ack: c.ack } : {}) });
   }
   if (outage) out.push({ id: "jev", area: "jev", tone: "warn", text: `Jev is unavailable: ${clip(outage.reason, 100)}`, to: "/admin/inference", since: outage.since });
   for (const r of ci.filter((x) => x.state === "red" && on.has(x.repo))) {
@@ -90,7 +96,7 @@ export async function health(db: Db, req: Req): Promise<Health> {
     const k = tripOf(trip.stage);
     if (k?.repo && isHiddenRepo(hidden, k.repo)) continue;
     const why = blankIfHidden(trip.reason, hidden);
-    problems.push({ id: `breaker:${trip.stage}`, area: "breaker", tone: "bad", text: `${stepTitle(k?.stage ?? trip.stage)}${k ? (k.repo ? ` in ${k.repo}` : " on every repo") : ""} is stopped by its breaker${why ? `: ${clip(why, 120)}` : ""}`, to: tripTarget(trip, hidden), since: trip.trippedAt });
+    problems.push({ id: `breaker:${trip.stage}`, area: "breaker", tone: "bad", text: `${stepTitle(k?.stage ?? trip.stage)}${k ? (k.repo ? ` in ${k.repo}` : " on every repo") : ""} is stopped by its breaker${why ? `: ${clip(why, 120)}` : ""}`, to: tripTarget(trip, hidden, staff), since: trip.trippedAt });
   }
   for (const l of facts.stops.zeroLimits) problems.push({ id: `limit:${l.step}`, area: "limit", tone: "warn", text: `${steps.get(l.step)?.title ?? l.step} is paused (limit 0 a day)`, to: "/pipeline", since: null });
   // The signed-in person's own stored token can no longer be refreshed, so merges and closes they approve cannot run as them.

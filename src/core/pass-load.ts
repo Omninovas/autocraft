@@ -31,7 +31,7 @@ import { PIPELINE_LOGIN_KEY } from "./rules.ts";
 import { authorWritesIn } from "../fixup/author-permission.ts";
 import { longLivedAll } from "../fixup/pushable.ts";
 import type { Settled } from "../classify/settled.ts";
-import { redMainRepos } from "../mainci/index.ts";
+import { redMainHolds } from "../mainci/index.ts";
 import { loadBlockerReads, type BlockerReads } from "../review/blockers.ts";
 import { CARRIED, carriedReviews, type Carried } from "../review/carry.ts";
 import { loadHoldInputs } from "../review/gate.ts";
@@ -81,8 +81,8 @@ export type PrPassData = {
   statements: Map<number, Statement>;
   /** Role and cached permission of the people the PRs' live workflows act for. */
   act: Map<PermKey, ActFacts>;
-  /** Repos whose default branch is red. */
-  mainRed: Set<string>;
+  /** Repos whose default branch is red, with the time it stops counting as red when nothing new is read (null: only a new result ends it). */
+  mainRed: Map<string, number | null>;
   quiet: Set<string>;
   longLived: Awaited<ReturnType<typeof longLivedAll>>;
   authorWrites: ReturnType<typeof authorWritesIn>;
@@ -189,7 +189,7 @@ export async function loadPrPass(db: Db, keys: KeySource, o: PrPassOptions, endW
       loadMainFixPrs(db), loadWorkflowFacts(db, keys, { nowMs: o.now }), listWorkflows(db, { live: true }), loadImplementFacts(db, keys),
       loadReviewFacts(db, keys, { now: o.now, own: logins }), loadAssignments(db, {}), loadOutsideHolds(db, keys),
       loadInScope(db, keys), loadActions(db, { kinds: ["merge"], states: ACTION_WAITS }),
-      redMainRepos(db, o.now), listQuietPrs(db, { repo: o.repo }), longLivedAll(db, keyRepos), loadAuthorPermissions(db), loadHoldInputs(db, keys, o.now), loadRepinPushes(db, keys), loadMadePushes(db, keys), loadLandedApprovals(db, keys), loadMergeEntryReviews(db, keys),
+      redMainHolds(db, o.now), listQuietPrs(db, { repo: o.repo }), longLivedAll(db, keyRepos), loadAuthorPermissions(db), loadHoldInputs(db, keys, o.now), loadRepinPushes(db, keys), loadMadePushes(db, keys), loadLandedApprovals(db, keys), loadMergeEntryReviews(db, keys),
     ]);
   const own = new Map<RefKey, RecordedPush[]>([...new Set([...made.keys(), ...patches.keys(), ...pushes.keys(), ...repins.keys()])]
     .map((key) => [key, ownPushes(made.get(key) ?? [], patches.get(key)?.pushes ?? [], pushes.get(key)?.moves ?? [], repins.get(key) ?? [])]));

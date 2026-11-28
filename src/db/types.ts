@@ -1468,6 +1468,7 @@ export interface MainCi {
   first_seen_at: string;
   state_changed_at: string;
   updated_at: string;
+  settled_state: string | null;
 }
 
 export interface MainFixes {
@@ -3321,7 +3322,7 @@ export const COLUMNS = {
   leader_leases: ["role", "holder", "epoch", "expires_ms"],
   liveness_items: ["repo", "number", "kind", "verdict", "cause", "state", "wait", "phase", "since", "checked_at"],
   liveness_state: ["id", "checked_at", "open"],
-  main_ci: ["repo", "head_sha", "branch", "state", "failing", "checks", "committed_at", "headline", "first_seen_at", "state_changed_at", "updated_at"],
+  main_ci: ["repo", "head_sha", "branch", "state", "failing", "checks", "committed_at", "headline", "first_seen_at", "state_changed_at", "updated_at", "settled_state"],
   main_fixes: ["repo", "head_sha", "check", "verdict", "state", "reason", "run_id", "run_url", "excerpt", "decision_id", "issue_number", "pr_number", "pr_url", "created_at", "updated_at", "session", "patch", "files", "lint_task", "lint_round", "lint_state"],
   mcp_tokens: ["id", "login", "token_hash", "label", "can_answer", "created_at", "last_used_at", "expires_at", "can_run", "idle_claim_at", "idle_tiers", "idle_repos", "kind", "machine", "can_agent"],
   merge_batch_prs: ["batch_id", "number", "head_oid", "position", "repo"],

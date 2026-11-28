@@ -265,6 +265,8 @@ async function buildPr(db: Db, d: PrPassData, ref: string, m: Mirrored, c: Ctx):
     noCi: !!d.ciSignals.get(repo)?.noCi, mainRed: d.mainRed.has(repo),
     implementOn: cfg.repo(repo).buildFeature("implement"),
   };
+  // A red main held only by its newest head's grace without checks stops holding with the clock alone.
+  refresh.soon(ref, d.mainRed.get(repo) ?? undefined);
   const pub = repoRow?.visibility === "public";
   const defaultBranch = repoRow?.default_branch ?? null;
   const optional = cfg.repo(repo).optionalChecks;

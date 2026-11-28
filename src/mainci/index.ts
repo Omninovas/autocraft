@@ -19,14 +19,25 @@ import { warmPass } from "../build/warm-queue.ts";
 /** Branch prefix of the PRs AutoCraft opens to fix a red main; the merge queue does not hold them while main is red. */
 export const MAIN_FIX_BRANCH_PREFIX = "autocraft/main-ci-";
 
-/** Repos whose default branch counts as red (derive()), also while its newest head's checks run after a red head. */
-export async function redMainRepos(db: Db, nowMs: number = Date.now()): Promise<Set<string>> {
-  return new Set([...await loadDecidingHeads(db, [])].filter(([, heads]) => currentHead(heads, nowMs)?.d.state === "red").map(([repo]) => repo));
+/**
+ * Repos whose default branch counts as red (derive()), also while its newest head's checks run after a red result, each with
+ * the time it stops counting as red when nothing new is read (derive()'s `until`; null: only a new result ends it).
+ */
+export async function redMainHolds(db: Db, nowMs: number = Date.now()): Promise<Map<string, number | null>> {
+  const out = new Map<string, number | null>();
+  for (const [repo, heads] of await loadDecidingHeads(db, [])) {
+    const d = currentHead(heads, nowMs)?.d;
+    if (d?.state === "red") out.set(repo, d.until);
+  }
+  return out;
 }
+
+/** The repos of redMainHolds. */
+export const redMainRepos = async (db: Db, nowMs: number = Date.now()): Promise<Set<string>> => new Set((await redMainHolds(db, nowMs)).keys());
 
 /** The repo's current head and the head its state comes from among its stored ones, and what derive() says of them; null when they name none. */
 function currentHead<H extends MainHeadSummary>(heads: readonly H[], nowMs: number): { cur: H; settled: H; d: NonNullable<ReturnType<typeof derive>> } | null {
-  const d = derive(heads.map((h): HeadRow => ({ sha: h.head_sha, state: h.state as MainCiState, committedAt: h.committed_at, headline: h.headline, firstSeenAt: h.first_seen_at, stateChangedAt: h.state_changed_at })), nowMs);
+  const d = derive(heads.map((h): HeadRow => ({ sha: h.head_sha, state: h.state as MainCiState, settledState: h.settled_state as MainCiState | null, committedAt: h.committed_at, headline: h.headline, firstSeenAt: h.first_seen_at, stateChangedAt: h.state_changed_at })), nowMs);
   return d ? { cur: heads.find((h) => h.head_sha === d.current.sha)!, settled: heads.find((h) => h.head_sha === d.settled.sha)!, d } : null;
 }
 

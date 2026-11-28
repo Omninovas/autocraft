@@ -23,14 +23,17 @@ export function classify(checks: MainCheck[], optional: string[] = []): MainCiSt
   return failed.length ? "optional" : "green";
 }
 
-export type HeadRow = { sha: string; state: MainCiState; committedAt: string | null; headline: string | null; firstSeenAt: string; stateChangedAt: string };
+/** `settledState`: the head's last result (red, green or optional), kept while a rerun of its checks runs; null before it had one. */
+export type HeadRow = { sha: string; state: MainCiState; settledState?: MainCiState | null; committedAt: string | null; headline: string | null; firstSeenAt: string; stateChangedAt: string };
 export type Culprit = { sha: string; headline: string | null; pr: number | null };
 /**
  * `state`: what the repo's default branch counts as for every decision and view. It is the newest head's own state, except while
- * that head's checks have not ended (running, or none in its first NONE_GRACE_MS): then a red newest settled head before it keeps
- * the branch red. `settled`: the head `state` comes from. `redSince` and `culprit` describe the red streak while `state` is red.
+ * that head's checks have not ended (running, or none in its first NONE_GRACE_MS): then the head's own last result, or else the
+ * newest result before it, keeps the branch red when it is red. `settled`: the head `state` comes from. `redSince` and `culprit`
+ * describe the red streak while `state` is red. `until`: when the branch stops counting as red with no new head or result (the
+ * newest head's grace without checks ends); null when only a new result ends it.
  */
-export type Derived = { current: HeadRow; state: MainCiState; settled: HeadRow; redSince: string | null; lastGreenSha: string | null; culprit: Culprit | null };
+export type Derived = { current: HeadRow; state: MainCiState; settled: HeadRow; redSince: string | null; lastGreenSha: string | null; culprit: Culprit | null; until: number | null };
 
 /** How long a head without checks may still be waiting for them to be registered; after that it is a head of a repo without CI. */
 export const NONE_GRACE_MS = 10 * 60_000;
@@ -44,7 +47,9 @@ export function prNumberOf(headline: string | null): number | null {
 const order = (a: HeadRow, b: HeadRow): number =>
   (a.committedAt ?? a.firstSeenAt).localeCompare(b.committedAt ?? b.firstSeenAt) || a.firstSeenAt.localeCompare(b.firstSeenAt);
 
-const settles = (s: MainCiState): boolean => s === "red" || s === "green" || s === "optional";
+const settles = (s: MainCiState | null | undefined): boolean => s === "red" || s === "green" || s === "optional";
+/** A head's result: its state once its checks ended, else the last result it had. */
+const resultOf = (r: HeadRow): MainCiState | null => (settles(r.state) ? r.state : settles(r.settledState) ? r.settledState! : null);
 
 /**
  * From the heads seen for one repo: the current head (the newest), the state the branch counts as (Derived), the last green head,
@@ -55,13 +60,14 @@ export function derive(rows: HeadRow[], nowMs: number = Date.now()): Derived | n
   if (!rows.length) return null;
   const sorted = [...rows].sort(order);
   const current = sorted[sorted.length - 1]!;
-  const greenAt = sorted.map((r) => r.state).lastIndexOf("green");
+  const greenAt = sorted.map(resultOf).lastIndexOf("green");
   const lastGreenSha = greenAt >= 0 ? sorted[greenAt]!.sha : null;
-  const checking = current.state === "running" || (current.state === "none" && nowMs - Date.parse(current.firstSeenAt) < NONE_GRACE_MS);
-  const before = checking ? sorted.findLast((r) => settles(r.state)) : undefined;
-  const settled = before?.state === "red" ? before : current;
-  if (settled.state !== "red") return { current, state: current.state, settled, redSince: null, lastGreenSha, culprit: null };
-  const okAt = sorted.findLastIndex((r) => r.state === "green" || r.state === "optional");
-  const first = sorted.slice(okAt + 1).find((r) => r.state === "red") ?? settled;
-  return { current, state: "red", settled, redSince: first.stateChangedAt, lastGreenSha, culprit: { sha: first.sha, headline: first.headline, pr: prNumberOf(first.headline) } };
+  const graceEnd = current.state === "none" ? Date.parse(current.firstSeenAt) + NONE_GRACE_MS : null;
+  const checking = current.state === "running" || (graceEnd !== null && nowMs < graceEnd);
+  const from = checking ? sorted.findLast((r) => resultOf(r) !== null) : undefined;
+  const settled = from && resultOf(from) === "red" ? from : current;
+  if (!(checking ? resultOf(settled) === "red" : current.state === "red")) return { current, state: current.state, settled, redSince: null, lastGreenSha, culprit: null, until: null };
+  const okAt = sorted.findLastIndex((r) => resultOf(r) === "green" || resultOf(r) === "optional");
+  const first = sorted.slice(okAt + 1).find((r) => resultOf(r) === "red") ?? settled;
+  return { current, state: "red", settled, redSince: first.stateChangedAt, lastGreenSha, culprit: { sha: first.sha, headline: first.headline, pr: prNumberOf(first.headline) }, until: graceEnd };
 }

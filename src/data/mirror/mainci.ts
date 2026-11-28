@@ -9,10 +9,14 @@ import type { HiddenRepos, LatestMainHead, MainHead, MainHeadRow, MainHeadSummar
 /** Heads kept per repo. */
 const KEEP_HEADS = 50;
 
-const SUMMARY = ["m.repo", "m.head_sha", "m.branch", "m.state", "m.failing", "m.committed_at", "m.headline", "m.first_seen_at", "m.state_changed_at", "m.updated_at"] as const;
+const SUMMARY = ["m.repo", "m.head_sha", "m.branch", "m.state", "m.settled_state", "m.failing", "m.committed_at", "m.headline", "m.first_seen_at", "m.state_changed_at", "m.updated_at"] as const;
+
+/** States in which a head's checks have ended. */
+const SETTLED = ["red", "green", "optional"];
 
 /**
- * Batched upsert keeping the state change time while the state is unchanged, then a prune to the newest 50 heads of every repo
+ * Batched upsert keeping the state change time while the state is unchanged, and the last settled state (red, green or
+ * optional) while a rerun of the head's checks runs, then a prune to the newest 50 heads of every repo
  * of the call; returns the state per "repo@sha". The caller classifies the state. One row per head in a statement (the later wins).
  */
 export async function saveMainHeads(db: Db, heads: MainHead[], at: string): Promise<Map<string, string>> {
@@ -23,11 +27,12 @@ export async function saveMainHeads(db: Db, heads: MainHead[], at: string): Prom
   await db.write(async () => {
     for (const part of kx.batches([...last.values()])) {
       await q.run(q.k.insertInto("main.main_ci")
-        .values(part.map((h) => ({ repo: h.repo, head_sha: h.sha, branch: h.branch, state: h.state, failing: h.failing, checks: h.checks, committed_at: h.committed_at, headline: h.headline, first_seen_at: at, state_changed_at: at, updated_at: at })))
+        .values(part.map((h) => ({ repo: h.repo, head_sha: h.sha, branch: h.branch, state: h.state, failing: h.failing, checks: h.checks, committed_at: h.committed_at, headline: h.headline, settled_state: SETTLED.includes(h.state) ? h.state : null, first_seen_at: at, state_changed_at: at, updated_at: at })))
         .onConflict((oc) => oc.columns(["repo", "head_sha"]).doUpdateSet((eb) => ({
           branch: eb.ref("excluded.branch"), state: eb.ref("excluded.state"), failing: eb.ref("excluded.failing"), checks: eb.ref("excluded.checks"),
           committed_at: eb.ref("excluded.committed_at"), headline: eb.ref("excluded.headline"), updated_at: eb.ref("excluded.updated_at"),
           state_changed_at: eb.case().when("main.main_ci.state", "=", eb.ref("excluded.state")).then(eb.ref("main.main_ci.state_changed_at")).else(eb.ref("excluded.updated_at")).end(),
+          settled_state: eb.fn.coalesce("excluded.settled_state", "main.main_ci.settled_state"),
         }))));
     }
     const ranked = q.k.selectFrom("main.main_ci as r")
@@ -55,8 +60,9 @@ export async function loadMainCi(db: Db, o: { repos?: string[]; hiddenOk?: Hidde
 }
 
 /**
- * The heads that decide what a repo's history says (mainci/classify.ts `derive`), oldest first per tracked repo: the newest, the
- * newest settled one (red, green or optional), the last green one, the last green or optional one and the first red one after it.
+ * The heads that decide what a repo's history says (mainci/classify.ts `derive`), oldest first per tracked repo, each by its
+ * result (its state once its checks ended, else its settled_state): the newest, the newest settled one, the last green one,
+ * the last green or optional one and the first red one after it.
  * Only the newest and the newest settled carry their failing checks.
  */
 export async function loadDecidingHeads(db: Db, hidden: HiddenRepos): Promise<Map<string, MainHeadSummary[]>> {
@@ -65,12 +71,15 @@ export async function loadDecidingHeads(db: Db, hidden: HiddenRepos): Promise<Ma
   const newestFirst = q.k.selectFrom("main.main_ci as m").select([...SUMMARY, (eb) => eb.fn.agg<number>("row_number").over((o) => o.partitionBy("m.repo")
     .orderBy(eb.fn.coalesce("m.committed_at", "m.first_seen_at"), "desc").orderBy("m.first_seen_at", "desc").orderBy("m.head_sha", "desc")).as("rn")])
     .where((eb) => trackedRepo(eb, "m.repo")).where(hiddenRepos(db, "m.repo", hidden));
-  const marks = q.k.selectFrom(newestFirst.as("h")).selectAll("h")
-    .select((eb) => eb.fn.min<number | null>(eb.case().when("h.state", "=", "green").then(eb.ref("h.rn")).end()).over((o) => o.partitionBy("h.repo")).as("green_rn"))
-    .select((eb) => eb.fn.min<number | null>(eb.case().when("h.state", "in", ["green", "optional"]).then(eb.ref("h.rn")).end()).over((o) => o.partitionBy("h.repo")).as("ok_rn"))
-    .select((eb) => eb.fn.min<number | null>(eb.case().when("h.state", "in", ["red", "green", "optional"]).then(eb.ref("h.rn")).end()).over((o) => o.partitionBy("h.repo")).as("settled_rn"));
+  // A head's result: its state once its checks ended, else the last result it had (a rerun of its checks runs).
+  const results = q.k.selectFrom(newestFirst.as("n")).selectAll("n")
+    .select((eb) => eb.case().when("n.state", "in", SETTLED).then(eb.ref("n.state")).else(eb.ref("n.settled_state")).end().as("result"));
+  const marks = q.k.selectFrom(results.as("h")).selectAll("h")
+    .select((eb) => eb.fn.min<number | null>(eb.case().when("h.result", "=", "green").then(eb.ref("h.rn")).end()).over((o) => o.partitionBy("h.repo")).as("green_rn"))
+    .select((eb) => eb.fn.min<number | null>(eb.case().when("h.result", "in", ["green", "optional"]).then(eb.ref("h.rn")).end()).over((o) => o.partitionBy("h.repo")).as("ok_rn"))
+    .select((eb) => eb.fn.min<number | null>(eb.case().when("h.result", "in", SETTLED).then(eb.ref("h.rn")).end()).over((o) => o.partitionBy("h.repo")).as("settled_rn"));
   const red = q.k.selectFrom(marks.as("g")).selectAll("g")
-    .select((eb) => eb.fn.max<number | null>(eb.case().when(eb.and([eb("g.state", "=", "red"), eb.or([eb("g.ok_rn", "is", null), eb("g.rn", "<", eb.ref("g.ok_rn"))])])).then(eb.ref("g.rn")).end()).over((o) => o.partitionBy("g.repo")).as("red_rn"));
+    .select((eb) => eb.fn.max<number | null>(eb.case().when(eb.and([eb("g.result", "=", "red"), eb.or([eb("g.ok_rn", "is", null), eb("g.rn", "<", eb.ref("g.ok_rn"))])])).then(eb.ref("g.rn")).end()).over((o) => o.partitionBy("g.repo")).as("red_rn"));
   const rows = await q.all(q.k.selectFrom(red.as("m")).select([...SUMMARY.filter((c) => c !== "m.failing"), (eb) => eb.case().when(eb.or([eb("m.rn", "=", 1), eb("m.rn", "=", eb.ref("m.settled_rn"))])).then(eb.ref("m.failing")).else("[]").end().as("failing")])
     .where((eb) => eb.or([eb("m.rn", "=", 1), eb("m.rn", "=", eb.ref("m.settled_rn")), eb("m.rn", "=", eb.ref("m.green_rn")), eb("m.rn", "=", eb.ref("m.ok_rn")), eb("m.rn", "=", eb.ref("m.red_rn"))]))
     .orderBy("m.repo").orderBy("m.rn", "desc"));

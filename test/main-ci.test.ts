@@ -5,7 +5,8 @@ import { mkdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { classify, derive, prNumberOf, type HeadRow, type MainCheck } from "../src/mainci/classify.ts";
-import { mainCiRepos, redMainRepos } from "../src/mainci/index.ts";
+import { mainCiRepos, redMainHolds, redMainRepos } from "../src/mainci/index.ts";
+import { saveMainHeads } from "../src/data/mirror/mainci.ts";
 import { decidePr } from "../src/core/decide.ts";
 import { prFacts } from "./world.ts";
 import { SCRATCH } from "./scratch.ts";
@@ -55,33 +56,44 @@ test("derive: a green head ends the red run; with no green head the oldest red h
   assert.equal(derive([]), null);
 });
 
-test("a red branch stays red while a newer head's checks run, and holds a ready PR until a head goes green", async () => {
+test("a red branch stays red while a head's checks run, also a rerun of the red head, and holds a ready PR until a head goes green", async () => {
   mkdirSync(SCRATCH, { recursive: true });
   const db = await connectDb(join(mkdtempSync(join(SCRATCH, "main-ci-")), "t.db"));
   const at = (min: number) => new Date(Date.parse("2026-01-01T00:00:00Z") + min * 60_000).toISOString();
   const ms = (min: number) => Date.parse(at(min));
   await db.run(db.k.insertInto("tracked_repos").values({ name: "app", added_by: "op", added_at: at(0), pipeline: 1 }));
-  const head = async (sha: string, min: number, state: string, failing: string[] = []) => await db.run(db.k.insertInto("main_ci").values({
-    repo: "app", head_sha: sha, branch: "main", state, failing: JSON.stringify(failing.map((name) => ({ name, url: null }))), checks: "[]",
-    committed_at: at(min), headline: `Change ${sha}`, first_seen_at: at(min), state_changed_at: at(min), updated_at: at(min),
-  }));
-  const decision = async (nowMs: number) => decidePr(prFacts({ repoFacts: { mainRed: (await redMainRepos(db, nowMs)).has("app") } }));
+  // A poll reading `sha` (committed at `committed`) in `state` at minute `min`.
+  const poll = async (sha: string, committed: number, state: string, min: number, failing: string[] = []) => await saveMainHeads(db, [{
+    repo: "app", sha, branch: "main", state, failing: JSON.stringify(failing.map((name) => ({ name, url: null }))), checks: "[]", committed_at: at(committed), headline: `Change ${sha}`,
+  }], at(min));
+  const held = async (nowMs: number) => {
+    const p = decidePr(prFacts({ repoFacts: { mainRed: (await redMainRepos(db, nowMs)).has("app") } }));
+    return p.state === "waiting-main-ci" && p.actions.length === 0;
+  };
+  const row = async (nowMs: number) => (await mainCiRepos(db, [], nowMs))[0]!;
 
-  await head("a", 0, "green");
-  await head("b", 10, "red", ["gate / test"]);
-  await head("c", 20, "running");
-  await head("d", 30, "running");
-  const held = await decision(ms(35));
-  assert.deepEqual([held.state, held.actions.length], ["waiting-main-ci", 0]);
-  const [row] = await mainCiRepos(db, [], ms(35));
-  assert.deepEqual([row!.state, row!.headState, row!.headSha, row!.culprit?.sha, row!.failing.map((f) => f.name)], ["red", "running", "d", "b", ["gate / test"]]);
+  await poll("a", 0, "green", 0);
+  await poll("b", 10, "red", 10, ["gate / test"]);
+  // The red head's failed jobs are rerun: the same head runs again.
+  await poll("b", 10, "running", 12);
+  assert.equal(await held(ms(13)), true);
+  assert.deepEqual([(await row(ms(13))).state, (await row(ms(13))).headState, (await row(ms(13))).culprit?.sha], ["red", "running", "b"]);
+  await poll("b", 10, "red", 14, ["gate / test"]);
+
+  await poll("c", 20, "running", 20);
+  await poll("d", 30, "running", 30);
+  assert.equal(await held(ms(35)), true);
+  const r = await row(ms(35));
+  assert.deepEqual([r.state, r.headState, r.headSha, r.culprit?.sha, r.failing.map((f) => f.name)], ["red", "running", "d", "b", ["gate / test"]]);
 
   // A head without checks may still be registering them; past that it is a repo without CI and holds nothing.
-  await head("e", 40, "none");
-  assert.equal((await decision(ms(45))).state, "waiting-main-ci");
-  assert.notEqual((await decision(ms(60))).state, "waiting-main-ci");
+  await poll("e", 40, "none", 40);
+  assert.equal(await held(ms(45)), true);
+  const until = (await redMainHolds(db, ms(45))).get("app");
+  assert.ok(until && until > ms(45) && until <= ms(60), "the hold names when its grace ends");
+  assert.equal(await held(ms(60)), false);
 
-  await head("f", 70, "green");
-  assert.notEqual((await decision(ms(75))).state, "waiting-main-ci");
-  assert.equal((await mainCiRepos(db, [], ms(75)))[0]!.culprit, null);
+  await poll("f", 70, "green", 70);
+  assert.equal(await held(ms(75)), false);
+  assert.equal((await row(ms(75))).culprit, null);
 });

@@ -466,6 +466,8 @@ const STATE_COLUMNS: [table: string, column: string, type: string][] = [
   ["agent_runs", "first_number", "INTEGER"],
   // The Task Runner credential whose lease ran the call (user-local mode), so the Agents page filters by runner.
   ["agent_runs", "token_id", "INTEGER"],
+  // A default-branch head's last result (red, green or optional), kept while a rerun of its checks runs (mainci/classify.ts derive).
+  ["main_ci", "settled_state", "TEXT"],
   // A Task Runner's idle claim and machine, kept with its status row (copied from mcp_tokens).
   ["remote_helpers", "idle_claim_at", "INTEGER"],
   ["remote_helpers", "idle_tiers", "TEXT"],

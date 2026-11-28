@@ -101,10 +101,8 @@ export const stepLines = (steps: readonly Step[]): string[] =>
 export const currentStep = (steps: readonly Step[]): Step | undefined => steps.find((s) => s.state === "running" || s.state === "waiting" || s.state === "stopped");
 
 const BLOCKER_LABEL: Record<Blocker, string> = {
-  "major-finding": tk("a major finding in the review"),
   "author-commits": tk("new commits from the author beyond what was approved"),
-  "failed-twice": tk("a step failed twice"),
-  "beyond-agreed": tk("work beyond what was agreed"),
+  "failed-twice": tk("a step failed twice or a fix could not be made"),
   other: tk("a stop the review or merge step reported"),
 };
 export const blockerLabel = (b: Blocker): string => t(BLOCKER_LABEL[b] ?? BLOCKER_LABEL.other);
@@ -175,19 +173,19 @@ function yesWhat(rec: Recommendation): string | null {
  */
 export function yesClause(rec: Recommendation): string | null {
   const fix = rec.parts.fix;
-  if (rec.close && !fix.length) return t("Reply yes to close it.");
-  if (rec.issue?.action === "backlog") return t("Reply yes to put it in the backlog.");
-  if (rec.issue?.action === "ask") return t("Reply yes to ask the reporter; the issue is reviewed again after their answer.");
+  if (rec.close && !fix.length) return t("Reply to go ahead and close it.");
+  if (rec.issue?.action === "backlog") return t("Reply to go ahead and put it in the backlog.");
+  if (rec.issue?.action === "ask") return t("Reply to go ahead and ask the reporter; the issue is reviewed again after their answer.");
   if (rec.answer && !fix.length) {
     const what = yesWhat(rec)!;
-    return rec.merges ? t("Reply yes to {what}, then merge ({checks}).", { what, checks: AFTER_CHECKS() }) : t("Reply yes to {what}; it comes back to you after.", { what });
+    return rec.merges ? t("Reply to go ahead: {what}, then merge ({checks}).", { what, checks: AFTER_CHECKS() }) : t("Reply to go ahead: {what}; it comes back to you after.", { what });
   }
-  if (rec.waits && !rec.again) return t("Reply yes to approve the merge and wait; new commits come back to you.");
-  if (rec.goes === "look") return rec.merges ? t("Reply yes to look again, then merge ({checks}).", { checks: AFTER_CHECKS() }) : t("Reply yes to look again.");
-  if (rec.goes === "on" && !fix.length && !rec.again) return rec.merges ? t("Reply yes to go on in your name, then merge ({checks}).", { checks: AFTER_CHECKS() }) : t("Reply yes to go on in your name.");
+  if (rec.waits && !rec.again) return t("Reply to go ahead: the merge is approved and waits; new commits come back to you.");
+  if (rec.goes === "look") return rec.merges ? t("Reply to go ahead: look again, then merge ({checks}).", { checks: AFTER_CHECKS() }) : t("Reply to go ahead and look again.");
+  if (rec.goes === "on" && !fix.length && !rec.again) return rec.merges ? t("Reply to go ahead in your name, then merge ({checks}).", { checks: AFTER_CHECKS() }) : t("Reply to go ahead in your name.");
   const what = yesWhat(rec);
-  if (what) return rec.merges ? t("Reply yes to {what}, then merge ({checks}).", { what, checks: AFTER_CHECKS() }) : t("Reply yes to {what}; it comes back to you after.", { what });
-  return rec.merges ? t("Reply yes to merge it ({checks}).", { checks: AFTER_CHECKS() }) : null;
+  if (what) return rec.merges ? t("Reply to go ahead: {what}, then merge ({checks}).", { what, checks: AFTER_CHECKS() }) : t("Reply to go ahead: {what}; it comes back to you after.", { what });
+  return rec.merges ? t("Reply to go ahead and merge it ({checks}).", { checks: AFTER_CHECKS() }) : null;
 }
 
 /** What a yes to the recommendation runs, as the item header's next step ("fix 1, then merge"); null when it runs nothing. */
@@ -199,7 +197,7 @@ export function yesNext(rec: Recommendation): string | null {
 
 /** A recommendation's sentence and what a yes runs; the sentence alone, with a request for words, when a yes runs nothing. */
 export const recommendationText = (rec: Recommendation): string =>
-  `${rec.text} ${yesClause(rec) ?? t("Reply yes, or write what to do instead.")}`;
+  `${rec.text} ${yesClause(rec) ?? t("Reply with what to do.")}`;
 
 /** The open recommendation and how to answer it, or null when none is open. */
 export const recommendationLine = (rec: Recommendation | null): string | null =>
@@ -402,8 +400,6 @@ function ambiguityText(understood: string, a: Ambiguity, mention?: string, propo
       : t("Every option is dropped. Nothing runs: name one to go with, or answer in a comment on the issue.");
     case "needs-words": return t("A yes can't answer this. {text} Nothing runs until then.", { text: a.text });
     case "nothing-to-fix": return t("The review names nothing to fix. Nothing runs until you say what to fix, as in “fix the export normals, then merge”.");
-    case "merge-skips-fixes": if (a.verdict) return earlierReview(a.parts, a.verdict) + " " + t("“merge” does not pass over that. Nothing runs: reply yes for the recommendation.");
-      return t("“merge” could mean merging without fixing {parts}, or the recommendation. Nothing runs: reply yes for the recommendation, or “drop {parts}, merge” to merge without them.", { parts: listText(a.parts) });
   }
 }
 
@@ -420,8 +416,6 @@ function refusalText(r: Refusal, clock: Clock): string {
     case "already-started": return t("Already started: {entry}, by {login}, {time}.", { entry: t(ENTRY_LABEL[r.entry]), login: r.by, time: clock(r.at) });
     case "implement-running": return t("Implement already runs, started by {login}, {time}. Send review alone to review its pull request again.", { login: r.by, time: clock(r.at) });
     case "implement-part": return t("Part {parts} belongs to the plan the implementation is built from. Fix or drop parts of its review, or hold it.", { parts: listText(r.parts) });
-    case "red-ci": return r.approved ? t("CI fails on the head; it merges when CI is green.") : t("CI fails on the head, and nothing merges on red CI. Send merge again when it is green.");
-    case "premerge-defects": return t("The pre-merge review found defects, and nothing merges past them as they are.");
     case "already-approved": return t("Already approved for merge by {login}, {time}.", { login: r.by, time: clock(r.at) });
   }
 }

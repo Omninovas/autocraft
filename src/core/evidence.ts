@@ -81,10 +81,6 @@ export const approvedHead = (pushes: readonly RecordedPush[], head: string, sinc
 const codePushes = (pushes: readonly RecordedPush[], reached: ReadonlySet<string>, since: string): RecordedPush[] =>
   pushes.filter((p) => !p.small && p.from !== p.to && p.at > since && (reached.has(p.to) || (p.landed && !reached.has(p.from))));
 
-/** Our pushes after `since` that changed the PR's own diff and that `head` holds: fix-ups, CI fixes and conflict resolutions; not a base merge that left the diff the same, an autorepin or the implementation session's revisions. */
-export const diffPushesSince = (pushes: readonly RecordedPush[], head: string, since: string): number =>
-  codePushes(pushes, ownHeads(pushes, head), since).filter((p) => p.what === "fix-up" || p.what === "CI fix" || p.what === "base merge").length;
-
 /** Up to when a person accepted a PR's code: an approval that answers no question (made after they last started or answered it, `said`) accepts what was pushed before it, else what they had seen (`since`). */
 export const agreedAt = (w: { approvedAt: string | null; since: string; said: string }): string => (w.approvedAt !== null && w.approvedAt > w.said ? w.approvedAt : w.since);
 

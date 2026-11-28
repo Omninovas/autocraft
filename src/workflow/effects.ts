@@ -20,15 +20,18 @@ import { conflictAhead } from "../core/conflict-ahead.ts";
 import { PARTS_ONLY, partLine } from "../core/evidence.ts";
 import { byHand, conflictPath, type ConflictPath } from "../core/decide.ts";
 import { loadPrFact } from "../core/facts.ts";
-import { cancelPreapproval, checkFixup, checkMergeLeg, inActiveBatch, INSTRUCTIONS_MAX, PreapprovalRefused, type CheckedStep } from "../preapproval/index.ts";
+import { cancelPreapproval, checkFixup, checkMergeLeg, inActiveBatch, INSTRUCTIONS_MAX, NotYet, PreapprovalRefused, type CheckedStep } from "../preapproval/index.ts";
 import { parseBranch, parsePrRef } from "../repin/manifest.ts";
 import { requestRepin } from "../repin/index.ts";
 import { markReviewsStale } from "../review/discussion.ts";
-import { LANE_STEPS } from "./advance.ts";
+import { LANE_STEPS } from "./blockers.ts";
 import { RULE_STARTER, type ItemKind, type ItemWorkflow, type PlanPart, type Surface } from "./types.ts";
 
-/** A legacy step refused the command; its message says why, translated (`effectText`). */
-export class EffectError extends Error {}
+/** A legacy step refused the command; its message says why, translated (`effectText`). `later`: a moment may lift it (src/preapproval NotYet). */
+export class EffectError extends Error {
+  readonly later: boolean;
+  constructor(message: string, later = false) { super(message); this.later = later; }
+}
 
 /**
  * The refusals of the legacy steps a command runs on, as translated text. The steps write English for logs and the classic pages; a
@@ -72,7 +75,7 @@ async function step<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (e) {
-    throw e instanceof EffectError ? e : new EffectError(effectText((e as Error).message));
+    throw e instanceof EffectError ? e : new EffectError(effectText((e as Error).message), e instanceof NotYet);
   }
 }
 

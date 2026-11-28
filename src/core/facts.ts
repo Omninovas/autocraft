@@ -29,7 +29,7 @@ import { workScore } from "./work-score.ts";
 import { tripsOfRepo } from "./push-outcome.ts";
 import { pushAllowed } from "./gates.ts";
 import { landedOpen } from "./decide.ts";
-import { ciAt, diffPushesSince, landedWhy, neededReview, type CiState } from "./evidence.ts";
+import { ciAt, landedWhy, neededReview, type CiState } from "./evidence.ts";
 import { standingFor } from "./standing.ts";
 import { mergeWaits, workflowGate } from "./may.ts";
 import type { WorkflowFact } from "../data/workflow/types.ts";
@@ -327,7 +327,6 @@ async function buildPr(db: Db, d: PrPassData, ref: string, m: Mirrored, c: Ctx):
   base.workflow = wfFact && overruled.length ? { ...wfFact, overruled } : wfFact;
   // The merge approval's own count of our pushes and tries starts when its person approved it or last went on with it.
   const owned = wfFact && (wfFact.approved || wfFact.entry === "merge") ? (wfRow?.approvedAt && wfRow.approvedAt > wfFact.since ? wfRow.approvedAt : wfFact.since) : null;
-  if (owned !== null && head) base.ownPushes = diffPushesSince(ours, head, owned);
   base.standing = standingIn(wfFact, d.workflow.actors, repo, acts);
   base.endedWorkflow = d.workflow.ended.get(ref) ?? null;
   if (integration) {

@@ -2,11 +2,9 @@
 // patch to apply, and stops for a person otherwise. Review fixes and red CI our steps give up on stop for the approver.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decidePr, pushHeld } from "../src/core/decide.ts";
-import { detectBlocker } from "../src/workflow/blockers.ts";
-import { atBlocker } from "../src/workflow/recommend.ts";
+import { decidePr } from "../src/core/decide.ts";
 import { fixPath, redCiPath, type FixPath } from "../src/preapproval/paths.ts";
-import { CIFIX_ASK_REASON, CIFIX_NO_LOG_REASON, PUSHES_PER_APPROVAL } from "../src/core/rules.ts";
+import { CIFIX_ASK_REASON, CIFIX_NO_LOG_REASON } from "../src/core/rules.ts";
 import { cifixAt } from "../src/data/changes/pure.ts";
 import type { CifixRow } from "../src/data/changes/types.ts";
 import { HEAD, prFacts } from "./world.ts";
@@ -84,17 +82,3 @@ test("an approved PR whose CI fix found no log yet and asked the contributor is 
   assert.notEqual(decidePr(prFacts({ ci: "failure", cifix, workflow: { entry: "fixup", approved: false, startedBy: "maint", startedAt: "2026-11-04T09:00:00.000Z", own: true } })).actions.find((a) => a.kind === "cifix")?.params?.bucket, "work");
 });
 
-test("after the limit of pushes of ours since the approval, the next one waits for the approver, who is asked what a yes lets AutoCraft do", () => {
-  const cases: [Over, string][] = [[takefix(), "fixup"], [red(), "cifix"]];
-  for (const [over, step] of cases) {
-    const pushes = (n: number) => prFacts({ ...over, ownPushes: n });
-    const pushing = (n: number) => decidePr(pushes(n)).actions.some((a) => (a.kind === "fixup" && a.params?.bucket === "fix") || (a.kind === "cifix" && a.params?.bucket === "work"));
-    assert.ok(pushing(PUSHES_PER_APPROVAL - 1), step);
-    assert.ok(!pushing(PUSHES_PER_APPROVAL), step);
-    assert.equal(pushHeld(pushes(PUSHES_PER_APPROVAL)), step);
-    const found = detectBlocker({ entry: "review", approved: true, authorPush: null, review: null, failures: [], fix: null, plannedFiles: [], leg: null, limit: { kind: "pushes", count: PUSHES_PER_APPROVAL, step: pushHeld(pushes(PUSHES_PER_APPROVAL))! } });
-    const rec = atBlocker(found!, null, []);
-    assert.ok(rec.merges && !rec.parts.fix.length, step);
-    assert.match(rec.text, new RegExp(`pushed ${PUSHES_PER_APPROVAL} changes.*Yes lets it go on`), step);
-  }
-});

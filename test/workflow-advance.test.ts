@@ -26,21 +26,16 @@ import { currentAttempt, writeStep } from "../src/implement/attempt.ts";
 import { openQuestion } from "../src/implement/questions.ts";
 import { recordSteps, startAttempt } from "../src/data/implement/index.ts";
 import { applyStuckAnswer, markStuck } from "../src/implement/stuck.ts";
-import { resumeOutsideStops } from "../src/workflow/outside-resume.ts";
+import { resumeRetiredStops } from "../src/workflow/retired-stops.ts";
 import { actor, approvedReview, asked, ASKS, fixup, implementationOpened, implementIssue, keep, labelOf, later, leg8, legState, MAINT, nextStep, ownPush, review, review8, say } from "./workflow-advance-world.ts";
 
 test("each blocker stops an approved item and keeps its approval", async () => {
   const cases: [Blocker, (w: World) => Promise<unknown>][] = [
-    ["major-finding", (w) => review(w, { head: "sha1", verdict: "hold" })],
     ["author-commits", async (w) => { await w.synced(1, "sha9"); await w.outOfScope(1, "sha9"); }],
     ["failed-twice", async (w) => { await fixup(w, { state: "failed" }); await fixup(w, { state: "refused" }); }],
     // A review job of the PR's approved lane that fails before it records anything, twice in a row.
     ["failed-twice", async (w) => {
       for (const id of [901, 902]) await w.db.run(w.db.k.insertInto("main.jobs").values({ id, step: "opus-review", params: JSON.stringify({ repo: "app", number: 1, lane: "approved", limit: 10 }), requested_by: "pipeline", requested_at: later(), state: "failed", started_at: later(), ended_at: later(), error: "reply could not be read", repo: "app" }));
-    }],
-    ["beyond-agreed", async (w) => {
-      await review(w, { head: "sha1", verdict: "take-fix", fixes: [{ file: "src/lib.rs", change: "check the bound", title: "bound check" }], at: "2026-01-01T00:00:00Z" });
-      await fixup(w, { state: "pushed", files: ["src/lib.rs", "src/other.rs"], patch: "+a\n-b" });
     }],
   ];
   for (const [blocker, evidence] of cases) {
@@ -55,18 +50,22 @@ test("each blocker stops an approved item and keeps its approval", async () => {
   }
 });
 
-test("an approved workflow an earlier release stopped at changes outside its purpose resumes with its approval; one stopped for another reason waits", async () => {
+test("an approved workflow an earlier release stopped at a stop that no longer stops an approved merge resumes with its approval; one stopped for another reason waits", async () => {
   const w = await approvedReview();
   await w.pr(2, { label: "feature" });
   assert.equal((await runCommand(w.db, actor, "dashboard", { parsed: parse("review and merge"), items: [{ repo: "app", number: 2 }] })).items[0]!.outcome, "run");
-  const stop = (n: number, blocker: string) => w.db.run(w.db.k.updateTable("main.item_workflows").where("number", "=", n)
-    .set({ state: "blocked", blocker, blocker_params: "{}", rec: JSON.stringify({ text: "Fix 1, then merge.", parts: { fix: [1], drop: [] }, merges: true }), rec_at: later(), rec_head: "sha1" }));
-  await stop(1, "outside-purpose");
-  await stop(2, "major-finding");
-  assert.deepEqual(await resumeOutsideStops(w.db), ["app#1"]);
-  const [one, two] = [(await liveWorkflow(w.db, "app", 1))!, (await liveWorkflow(w.db, "app", 2))!];
+  await w.pr(3, { label: "feature" });
+  assert.equal((await runCommand(w.db, actor, "dashboard", { parsed: parse("review and merge"), items: [{ repo: "app", number: 3 }] })).items[0]!.outcome, "run");
+  const stop = (n: number, blocker: string, params: object = {}) => w.db.run(w.db.k.updateTable("main.item_workflows").where("number", "=", n)
+    .set({ state: "blocked", blocker, blocker_params: JSON.stringify(params), rec: JSON.stringify({ text: "Fix 1, then merge.", parts: { fix: [1], drop: [] }, merges: true }), rec_at: later(), rec_head: "sha1" }));
+  await stop(1, "major-finding");
+  await stop(2, "failed-twice", { step: "fix-up" });
+  await stop(3, "other", { code: "answer", reason: "a maintainer's answer" });
+  assert.deepEqual(await resumeRetiredStops(w.db), ["app#1", "app#3"]);
+  const [one, two, three] = [(await liveWorkflow(w.db, "app", 1))!, (await liveWorkflow(w.db, "app", 2))!, (await liveWorkflow(w.db, "app", 3))!];
   assert.deepEqual([one.state, one.blocker, one.rec, one.approvedBy], ["running", null, null, MAINT]);
-  assert.deepEqual([two.state, two.blocker], ["blocked", "major-finding"]);
+  assert.deepEqual([three.state, three.rec], ["running", null]);
+  assert.deepEqual([two.state, two.blocker], ["blocked", "failed-twice"]);
   w.close();
 });
 
@@ -93,37 +92,39 @@ test("however much our own pushes change, they never stop an approved item", asy
   }
 });
 
-test("an answer to merge after a blocker resumes the merge leg and does not stop again on what the person saw", async () => {
-  const w = await approvedReview();
-  const db = w.db;
-  await new Promise((r) => setTimeout(r, 10));
-  await review(w, { head: "sha1", verdict: "hold", at: new Date().toISOString() });
-  await advanceWorkflows(db);
-  assert.equal((await liveWorkflow(db, "app", 1))!.state, "blocked");
-
-  // A hold with no recommendation of its own offers a new review, never a merge it did not recommend.
-  assert.match((await liveWorkflow(db, "app", 1))!.rec!.text, /hold it/);
-  // The answer comes after the review: what it found is what the person chose to go on with.
-  await new Promise((r) => setTimeout(r, 10));
-  const r = await runCommand(db, actor, "dashboard", { parsed: parse("merge"), items: [{ repo: "app", number: 1 }] });
-  assert.equal(r.items[0]!.outcome, "run", r.lines.join("\n"));
-  await advanceWorkflows(db);
-  const wf = (await liveWorkflow(db, "app", 1))!;
-  assert.deepEqual([wf.state, wf.blocker, wf.approvedBy], ["running", null, MAINT]);
-  const leg = (await db.get(db.k.selectFrom("main.preapprovals").select(["state", "workflow_id"]).orderBy("id", "desc").limit(1)))!;
-  assert.deepEqual([leg.state, leg.workflow_id], ["review", wf.id], "a new merge leg works for the workflow");
-  await advancePreapprovals(db);
-  assert.equal(await legState(w), "ci", "the hold the person answered past counts as a take");
-
-  // It goes on like any approved merge: the pre-merge review, the hand-over, the merge.
-  assert.ok((await w.prPlan(1)).actions.some((a) => a.kind === "premerge"), "the pre-merge review runs");
-  await (await w.premerge(1, "clean")).verified(1);
-  await advancePreapprovals(db);
-  assert.equal(await legState(w), "queued");
-  assert.ok((await w.prPlan(1)).actions.some((a) => a.kind === "merge"), "the merge queue merges it");
+test("an approved PR whose review has a major finding, or says hold, gets a fix-up as the approver and merges without a question", async () => {
+  for (const kind of ["major", "hold"] as const) {
+    const w = await approvedReview();
+    const db = w.db;
+    const pass = async () => { await advanceWorkflows(db); await untilQuiet(db, [() => advancePreapprovals(db)], 3); await advanceWorkflows(db); };
+    const asks = async () => { const wf = (await liveWorkflow(db, "app", 1))!; return [wf.state, wf.rec, wf.approvedBy]; };
+    if (kind === "major") await review(w, { head: "sha1", verdict: "take-fix", at: new Date().toISOString(), fixes: [{ file: "src/lib.rs", change: "check the bound before the read", title: "out-of-bounds read", major: true }] });
+    else await review(w, { head: "sha1", verdict: "hold", at: new Date().toISOString() });
+    await pass();
+    assert.deepEqual(await asks(), ["running", null, MAINT], `${kind}: no question`);
+    if (kind === "hold") {
+      const asked = await w.rows("SELECT by, from_head FROM operator_fixups WHERE number = 1");
+      assert.deepEqual(asked.map((r) => [r.by, r.from_head]), [[MAINT, "sha1"]], "the fix-up is asked for as the approver");
+      assert.equal(await legState(w), "fixup", "a new merge leg waits for its push");
+      w.close();
+      continue;
+    }
+    assert.ok((await w.prPlan(1)).actions.some((a) => a.kind === "fixup" && a.params?.source === "review"), "the review's fix-up runs");
+    await fixup(w, { state: "pushed", files: ["src/lib.rs"], patch: "+b\n-a", to: "sha2" });
+    await db.run(db.k.insertInto("main.push_outcomes").values({ at: later(), stage: "fixup", action: "fixup-push", repo: "app", number: 1, from_oid: "sha1", to_oid: "sha2", before_res: "green" }));
+    await w.synced(1, "sha2");
+    await pass();
+    await review(w, { head: "sha2", verdict: "take", at: new Date().toISOString() });
+    await (await w.premerge(1, "clean")).verified(1);
+    await pass();
+    assert.deepEqual(await asks(), ["running", null, MAINT]);
+    assert.equal(await legState(w), "queued");
+    assert.ok((await w.prPlan(1)).actions.some((a) => a.kind === "merge"), "the merge queue merges it");
+    w.close();
+  }
 });
 
-test("a failed verification or a lasting refusal after the hand-over asks once, and a yes goes on past it", async () => {
+test("a lasting refusal after the hand-over asks once, and a yes goes on past it; a failed verification gets a fix-up instead", async () => {
   for (const what of ["verification", "refusal"] as const) {
     const w = await approvedReview();
     const db = w.db;
@@ -144,6 +145,14 @@ test("a failed verification or a lasting refusal after the hand-over asks once, 
     }
     await pass();
     const wf = (await liveWorkflow(db, "app", 1))!;
+    if (what === "verification") {
+      assert.deepEqual([wf.state, wf.rec, wf.approvedBy], ["running", null, MAINT], "no question");
+      const asked = await w.rows("SELECT by, instructions FROM operator_fixups WHERE number = 1");
+      assert.ok(asked.length === 1 && asked[0]!.by === MAINT && /verification/.test(String(asked[0]!.instructions)), JSON.stringify(asked));
+      assert.equal(await plansMerge(), false, "nothing merges before the fix");
+      w.close();
+      continue;
+    }
     assert.deepEqual([wf.state, wf.approvedBy], ["blocked", MAINT], what);
     assert.ok(wf.rec?.text, what);
     assert.equal(await plansMerge(), false, what);
@@ -235,7 +244,7 @@ test("a queued merge leg whose workflow ended with the merge is recorded merged,
   assert.equal(await legState(w), "merged");
 });
 
-test("an approved merge goes on past an unsure pre-merge review with no defect; a defect stops it as a major finding", async () => {
+test("an approved merge goes on past an unsure pre-merge review with no defect; a defect past its fix-up rounds gets a fix-up as the approver", async () => {
   for (const kind of ["clean", "defect"] as const) {
     const w = await approvedReview();
     const db = w.db;
@@ -263,7 +272,10 @@ test("an approved merge goes on past an unsure pre-merge review with no defect; 
     await advanceWorkflows(db);
     const wf = (await liveWorkflow(db, "app", 1))!;
     if (kind === "clean") assert.deepEqual([await legState(w), wf.state], ["queued", "running"], "unsure with no finding: the merge queue has it");
-    else assert.deepEqual([await legState(w), wf.state, wf.blocker], ["failed", "blocked", "major-finding"]);
+    else {
+      assert.deepEqual([wf.state, wf.rec, await legState(w)], ["running", null, "fixup"], "no question; a new leg waits for the fix");
+      assert.deepEqual((await w.rows("SELECT by FROM operator_fixups WHERE number = 1")).map((r) => r.by), [MAINT]);
+    }
     w.close();
   }
 });
@@ -377,17 +389,11 @@ test("an answer on an implement issue queues a fix-up of the named part on its i
   assert.match(fx[0]!.instructions ?? "", /folder per document/);
 });
 
-test("an approved implementation that changed files its plan does not name comes back before it merges, once", async () => {
+test("an approved implementation that changed files its plan does not name goes on to its merge without asking", async () => {
   const w = await implementationOpened(["src/a.rs", "src/zzz.rs", "Cargo.lock"], true);
   await advanceWorkflows(w.db);
   const wf = (await liveWorkflow(w.db, "app", 7))!;
-  assert.deepEqual([wf.state, wf.blocker, wf.approvedBy, wf.blockerParams?.files], ["blocked", "beyond-agreed", MAINT, ["src/zzz.rs"]]);
-  assert.match(wf.rec!.text, /src\/zzz\.rs/);
-  assert.equal(await leg8(w), undefined, "no merge leg starts");
-  const r = await say(w, "yes");
-  assert.equal(r.outcome, "run", r.line);
-  await advanceWorkflows(w.db);
-  assert.deepEqual([(await liveWorkflow(w.db, "app", 7))!.state, await leg8(w)], ["running", "review"]);
+  assert.deepEqual([wf.state, wf.rec, wf.approvedBy, await leg8(w)], ["running", null, MAINT, "review"]);
 });
 
 test("an implementation inside its plan merges without asking; one beyond it names the files in the end recommendation", async () => {
@@ -407,7 +413,6 @@ test("an implementation inside its plan merges without asking; one beyond it nam
 test("the other blockers stop an approved implementation too", async () => {
   const cases: [Blocker, (w: World) => Promise<unknown>][] = [
     ["author-commits", (w) => w.synced(8, "theirs")],
-    ["major-finding", (w) => review8(w, "hold")],
     ["failed-twice", async (w) => { for (const state of ["failed", "rejected"]) await w.db.run(w.db.k.insertInto("main.ci_fixes").values({ repo: "app", number: 8, head: "sha8", kind: "patch", state, attempt: state === "failed" ? 1 : 2, created_at: later() })); }],
   ];
   for (const [blocker, evidence] of cases) {
@@ -426,10 +431,10 @@ test("the other blockers stop an approved implementation too", async () => {
 test("an implementation's question is for the head it showed: our push leaves it, someone else's refuses the answer and is asked about", async () => {
   const w = await implementationOpened(["src/a.rs"], true);
   await advanceWorkflows(w.db);
-  await review8(w, "hold");
+  for (const state of ["failed", "rejected"]) await w.db.run(w.db.k.insertInto("main.ci_fixes").values({ repo: "app", number: 8, head: "sha8", kind: "patch", state, attempt: state === "failed" ? 1 : 2, created_at: later() }));
   await advanceWorkflows(w.db);
   const asked = (await liveWorkflow(w.db, "app", 7))!;
-  assert.deepEqual([asked.blocker, asked.recHead], ["major-finding", "sha8"]);
+  assert.deepEqual([asked.blocker, asked.recHead], ["failed-twice", "sha8"]);
   await ownPush(w, "sha8", "ours8", 8);
   await advanceWorkflows(w.db);
   assert.equal((await liveWorkflow(w.db, "app", 7))!.recAt, asked.recAt);

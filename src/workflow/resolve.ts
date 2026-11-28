@@ -14,7 +14,7 @@ import { heldWork, sameQuestion, type CloseReason, type CommandPart, type Entry,
  * queued or waits for its person, which a hold takes back. `mergeWaits`: the merge the sender approved
  * waits for their own sign-in or access.
  */
-export type ItemState = { kind: ItemKind; workflow: ItemWorkflow | null; held?: ItemWorkflow | null; closing?: boolean; mergeWaits?: boolean; /** The question is about red CI, and CI fails on the head now. */ redCi?: boolean; /** The question is about a review that failed for good, and it has not gone with a later commit. */ reviewFailed?: boolean };
+export type ItemState = { kind: ItemKind; workflow: ItemWorkflow | null; held?: ItemWorkflow | null; closing?: boolean; mergeWaits?: boolean; /** The question is about a review that failed for good, and it has not gone with a later commit. */ reviewFailed?: boolean };
 
 /** How the confirmation line attributes the run: "approved by", "started by", ...; null: "by". */
 export type How = "started" | "approved" | "answered" | "held" | "resumed" | "set" | null;
@@ -73,8 +73,6 @@ export type Ambiguity =
   | { why: "part-matches-several"; words: string; parts: number[] }
   | { why: "weight-unstarted"; weight: number }
   | { why: "conflict"; words: string[] }
-  /** `merge` while the open recommendation fixes parts first: merge without them, or the recommendation? */
-  | { why: "merge-skips-fixes"; parts: number[]; /** What the review that asks for them says of the PR. */ verdict?: "hold" | "close" }
   /** An implement question's options: the answer leaves several to go with, or names more than one. */
   | { why: "pick-one"; parts: number[] }
   /** A yes to a recommendation that runs nothing by itself: `text` says what answers it. */
@@ -98,11 +96,7 @@ export type Refusal =
   | { why: "implement-running"; by: string; at: string }
   | { why: "already-approved"; by: string; at: string }
   /** A ready plan's part: the implementation is built from the whole plan, so a part can't be fixed or dropped on its own. */
-  | { why: "implement-part"; parts: number[] }
-  /** The pre-merge review found defects, and nothing merges past them as they are. */
-  | { why: "premerge-defects" }
-  /** CI fails on the head and nothing repairs it; `approved`: it merges once CI is green. */
-  | { why: "red-ci"; approved: boolean };
+  | { why: "implement-part"; parts: number[] };
 
 export type Resolved =
   | { kind: "run"; run: Run }
@@ -118,18 +112,6 @@ const run = (r: Partial<Run>): Resolved => ({
   kind: "run",
   run: { how: null, start: null, again: null, fix: [], drop: [], approve: false, replaces: false, retryMerge: false, retryPremerge: false, merges: false, weight: null, end: null, resume: null, autorepin: null, runner: null, answers: false, goesOn: false, pick: null, instruction: null, thenImplement: false, implements: false, asks: null, ...r },
 });
-
-/** The item stopped at defects of the pre-merge review: their plan parts (none where nobody asked for their fixes yet); null otherwise. */
-export function premergeStopped(wf: ItemWorkflow): number[] | null {
-  const parts = wf.state === "blocked" ? wf.blockerParams?.premerge : undefined;
-  return Array.isArray(parts) ? (parts as number[]) : null;
-}
-
-/** The person drops every part of the pre-merge stop that blocks the merge (with those dropped before): they overrule the findings, and it goes on to the merge. */
-const overrules = (wf: ItemWorkflow, drop: readonly number[]): boolean => {
-  const blocking = (premergeStopped(wf) ?? []).filter((n) => wf.plan.some((p) => p.n === n && p.major));
-  return blocking.length > 0 && blocking.every((n) => drop.includes(n) || wf.plan.some((p) => p.n === n && p.state === "dropped"));
-};
 
 const ENTRY_OF = { review: "review", "fix-up": "fixup", implement: "implement" } as const;
 type EntryWord = keyof typeof ENTRY_OF;
@@ -278,20 +260,13 @@ export function resolve(parsed: Parsed, state: ItemState): Resolved {
   if (rec && drop.length && !fix.length && !entry && !instruction) {
     // A close drops nothing: dropping parts of it could mean "close anyway" or "don't close".
     if (rec.close) return ambiguous({ why: "conflict", words: ["close", ...named.map((p) => `drop ${p.part}`)] });
-    if (merge && state.redCi) return refused({ why: "red-ci", approved });
-    if (merge && state.reviewFailed) return withoutReview(wf, drop, weight, ambiguous);
+    if (merge && state.reviewFailed) return withoutReview(wf, drop, weight);
     const left = rec.parts.fix.filter((n) => !drop.includes(n));
-    if (!left.length && (merge || rec.merges) && premergeStopped(wf) && !overrules(wf, drop)) return refused({ why: "premerge-defects" });
     return accept(wf, left, [...new Set([...rec.parts.drop, ...drop])], weight, merge);
   }
+  // The word merge on an open recommendation is the merge button: what the recommendation runs, then the merge.
   if (!entry && !named.length && merge) {
-    if (rec) {
-      if (premergeStopped(wf)) return refused({ why: "premerge-defects" });
-      if (state.redCi) return refused({ why: "red-ci", approved });
-      if (rec.parts.fix.length) return ambiguous({ why: "merge-skips-fixes", parts: rec.parts.fix });
-      if (state.reviewFailed) return withoutReview(wf, [], weight, ambiguous);
-      return accept(wf, [], rec.parts.drop, weight, true);
-    }
+    if (rec) return state.reviewFailed ? withoutReview(wf, [], weight) : accept(wf, rec.parts.fix, rec.parts.drop, weight, true);
     if (approved && state.mergeWaits) return run({ retryMerge: true, merges: true, weight, how: "approved" });
     if (approved) return refused({ why: "already-approved", by: wf.approvedBy!, at: wf.approvedAt ?? "" });
     return run({ approve: true, merges: true, weight, how: "approved" });
@@ -359,17 +334,24 @@ const goOn = (held: ItemWorkflow, weight: number | null): Resolved => {
 /** A recommendation that fixes, runs, answers, closes and merges nothing: a yes to it would do nothing. */
 const runsNothing = (r: NonNullable<ItemWorkflow["rec"]>): boolean => !r.parts.fix.length && !r.again && !r.answer && !r.close && !r.merges && !r.goes && !r.issue;
 
-/** Starts the PR whose review failed for good at the merge queue, unless an earlier review of that head asks for what no one dropped. */
-function withoutReview(wf: ItemWorkflow, drop: number[], weight: number | null, ambiguous: (a: Ambiguity) => Resolved): Resolved {
+/**
+ * The word merge where the review failed for good at the head: the PR starts at the merge queue without that review, unless an earlier
+ * review of that head asks for what no one dropped. Then its fixes are made first, or, for a hold or close with none, the review is tried
+ * again, as the recommendation says; either way the merge follows.
+ */
+function withoutReview(wf: ItemWorkflow, drop: number[], weight: number | null): Resolved {
   const { parts, verdict } = wf.rec!.skipsReview!;
   const left = parts.filter((n) => !drop.includes(n) && wf.plan.some((p) => p.n === n && p.state === "planned"));
-  if (left.length || verdict) return ambiguous({ why: "merge-skips-fixes", parts: left, ...(verdict ? { verdict } : {}) });
+  const drops = [...new Set([...wf.rec!.parts.drop, ...drop])];
+  if (left.length) return accept(wf, left, drops, weight, true);
+  if (verdict) return accept(wf, [], drops, weight, true);
   return run({ start: "merge", replaces: true, drop, approve: true, merges: true, weight, answers: true, how: "approved" });
 }
 
 /**
  * Runs the recommendation's plan with these parts; approves the merge when it ends in one (or `merge` was said) and nobody has. The word
- * merge approves it without the step the recommendation runs again; a yes runs that step.
+ * merge runs what the recommendation runs, then merges, and never closes or backlogs the item; only where the recommendation gives a
+ * pre-merge review that failed for good one more try does merge go on without it, as its text says.
  */
 function accept(wf: ItemWorkflow, fix: number[], drop: number[], weight: number | null, merge = false): Resolved {
   const rec = wf.rec!;
@@ -385,7 +367,7 @@ function accept(wf: ItemWorkflow, fix: number[], drop: number[], weight: number 
   const approve = merges && !wf.approvedBy;
   if (rec.answer && !fix.length) return run({ pick: rec.answer, drop, approve, merges, weight, answers: true, how: approve ? "approved" : "answered" });
   return run({
-    again: fix.length ? "fixup" : merge ? null : rec.again ?? null, fix, drop, approve, merges, weight, answers: true, goesOn: !!rec.goes,
+    again: fix.length ? "fixup" : rec.again ?? null, fix, drop, approve, merges, weight, answers: true, goesOn: !!rec.goes,
     retryPremerge: !!rec.retriesPremerge && !merge && !fix.length, how: approve ? "approved" : "answered",
   });
 }

@@ -35,8 +35,8 @@ export function ChatComposer({ open, blocked, onSend }: { open: boolean; blocked
             rows={1}
             value={text}
             disabled={!!blocked}
-            aria-label={open ? t("Reply yes, or say what to do instead") : t("Reply to AutoCraft")}
-            placeholder={blocked ?? (open ? t("Reply yes, or say what to do instead…") : t("Reply to AutoCraft…"))}
+            aria-label={open ? t("Reply to go ahead, or say what to do instead") : t("Reply to AutoCraft")}
+            placeholder={blocked ?? (open ? t("Reply to go ahead, or say what to do instead…") : t("Reply to AutoCraft…"))}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {

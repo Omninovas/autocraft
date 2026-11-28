@@ -17,7 +17,7 @@ export type ResultLine = { parts: number[]; text: string };
 
 export const SAMPLE_RESULT: ResultAsk[] = [{
   ref: "photocraft#7",
-  recommendation: "Recommendation: Fix 1 and 2, then merge. Reply yes to fix 1 and 2, then merge (after the pre-merge check and green CI).",
+  recommendation: "Recommendation: Fix 1 and 2, then merge. Reply to go ahead: fix 1 and 2, then merge (after the pre-merge check and green CI).",
   parts: [
     { n: 1, title: "src/export/webp.rs:88 passes the quality setting as a fraction while the encoder expects 0 to 100, so every export uses the lowest quality.", state: "planned", major: true },
     { n: 2, title: "src/export/webp.rs:120 ignores the error of the encoder and writes an empty file.", state: "planned" },

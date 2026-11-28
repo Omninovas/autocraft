@@ -364,7 +364,7 @@ async function myItems(env: McpEnv, raw: unknown): Promise<ToolResult> {
 
 function helpText(): ToolResult {
   const lines = COMMANDS.map((c) => `${c.usage}${c.answer ? " (answer to a plan only)" : ""}: ${t(c.does)} ${t(c.back)} Example: ${c.example}`);
-  return { text: [t("Reply yes to run an open recommendation, or write what to do instead. AutoCraft waits for an unambiguous instruction."), ...lines].join("\n") };
+  return { text: [t("Reply to go ahead with an open recommendation, or write what to do instead. AutoCraft waits for an unambiguous instruction."), ...lines].join("\n") };
 }
 
 async function sendCommand(env: McpEnv, raw: unknown): Promise<ToolResult> {

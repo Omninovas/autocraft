@@ -2,7 +2,7 @@
 import {
   BATCHABLE, MAIN_RED_HELD, OFF_DEFAULT_REASON, autoEligible, PREMERGE_DEFECT_REASON, PREMERGE_UNSURE_REASON, PREMERGE_FAILED_REASON, PREMERGE_MAX_TRIES, RETRY_AFTER_MS,
   RULE_LABELS, RULE_SIZES, RULE_TIERS, UNSURE_REASON, VERIFY_UNAVAILABLE, ciAllows, conflictNote, verifyAllows, verifyOk,
-  FIXUP_MAX_ATTEMPTS, PUSHES_PER_APPROVAL, CIFIX_FINAL_STATES, CIFIX_MAX_PUSHES_PER_PR, CIFIX_MAX_TRIES, CIFIX_MAX_TRIES_PER_PR, STATE_REFUSAL, TRANSIENT_REFUSAL,
+  FIXUP_MAX_ATTEMPTS, CIFIX_FINAL_STATES, CIFIX_MAX_PUSHES_PER_PR, CIFIX_MAX_TRIES, CIFIX_MAX_TRIES_PER_PR, STATE_REFUSAL, TRANSIENT_REFUSAL,
 } from "./rules.ts";
 import { UNCHECKED_REASON } from "./sensitive.ts";
 import { inFlightNow, isWork, unassignActions } from "./assignment.ts";
@@ -77,7 +77,7 @@ export function premergeFix(f: PrFacts): "fix" | "running" | "used" | "none" {
   const row = f.premerge, w = workflowOf(f);
   if (!row?.hasFindings || row.defects === 0 || f.handOver || (w && !w.approved && w.entry !== "merge")) return "none";
   if (f.premergeFixRunning || f.lint.some((l) => l.source === "premerge")) return "running";
-  if (f.premergeFixUsed || pushesUsed(f)) return "used";
+  if (f.premergeFixUsed) return "used";
   return row.fixesSafe && f.pushable && pushAllowed(f, "fixup") ? "fix" : "none";
 }
 
@@ -394,7 +394,6 @@ export function fixupOf(f: PrFacts): { bucket: FixupBucket; done: boolean } | nu
   if (has("too-large")) return askOnce(true);
   if (!f.pushable) return ask(false);
   if (x.attempts + 1 > FIXUP_MAX_ATTEMPTS) return commenting ? askOnce(false) : { bucket: "hold", done: false };
-  if (pushesUsed(f)) return toPerson;
   return { bucket: pushAllowed(f, "fixup") ? "fix" : "unapproved", done: false };
 }
 
@@ -428,26 +427,10 @@ export function ciFixIdle(f: PrFacts): string | null {
  * at the head still runs, so the failed run's log cannot be read and its failed jobs cannot be rerun yet. read-wait: the failure log could not
  * be read yet and is read again after a backoff (cifix.readAgainAt).
  */
-export type CifixBucket = "unreviewed" | "comment-wait" | "work" | "unapproved" | "cannot-push" | "formatting" | "linting" | "collect" | "rerun" | "rerun-wait" | "ci-running" | "read-wait" | "failed" | "capped" | "pushes-used" | "done";
+export type CifixBucket = "unreviewed" | "comment-wait" | "work" | "unapproved" | "cannot-push" | "formatting" | "linting" | "collect" | "rerun" | "rerun-wait" | "ci-running" | "read-wait" | "failed" | "capped" | "done";
 
 /** A person approved the PR's merge (or started it at the merge queue): its red CI is AutoCraft's to fix, and what the CI fix gives up on goes back to that person, never to the contributor. */
 export const mergeOwned = (f: PrFacts): boolean => { const w = workflowOf(f); return !!w && (w.approved || w.entry === "merge"); };
-
-/** A PR a person approved for merge had PUSHES_PER_APPROVAL pushes of ours that changed its own diff since they last went on with it: the next push waits for their answer. */
-export const pushesUsed = (f: PrFacts): boolean => approvedForMerge(f) && (f.ownPushes ?? 0) >= PUSHES_PER_APPROVAL;
-
-/** A push of ours on a PR approved for merge: the review's fix-up, the pre-merge review's fix-up, the CI fix, the merge of the base branch. */
-export type HeldPush = "fixup" | "premerge" | "cifix" | "conflict";
-/** The push that would run next on the PR if `pushesUsed` did not hold it back; null when none is held. */
-export function pushHeld(f: PrFacts): HeldPush | null {
-  if (!pushesUsed(f)) return null;
-  const free: PrFacts = { ...f, ownPushes: 0 };
-  if (f.mergeable === "CONFLICTING") return f.conflict?.bucket === "merge" ? "conflict" : null;
-  if (fixupOf(free)?.bucket === "fix") return "fixup";
-  if (premergeFix(free) === "fix") return "premerge";
-  const cf = cifixBucket(free);
-  return cf === "work" || cf === "collect" ? "cifix" : null;
-}
 
 /** The CI fix may have the failed jobs rerun: the repo approves CI reruns, and a review read the head (none at a head the contributor pushed). */
 export const cifixMayRerun = (f: PrFacts): boolean => f.repoFacts.ciApproved && !f.gateRed;
@@ -498,8 +481,6 @@ export function cifixBucket(f: PrFacts): CifixBucket | null {
   if (c.readAgainAt !== undefined) return "read-wait";
   if (c.infraRuns && c.rerunAt === null) return "rerun";
   if (c.rerunAt !== null && !(c.checksAt && c.checksAt > c.rerunAt)) return "rerun-wait";
-  // The pushes of ours since the person last went on with the approved PR are used up: the next CI fix waits for their answer.
-  if (pushesUsed(f)) return "pushes-used";
   if (!f.pushable && (!f.repoFacts.commentApproved || f.quiet)) return "cannot-push";
   if (f.pushable && !pushAllowed(f, "cifix")) return "unapproved";
   return "work";
@@ -581,7 +562,6 @@ const stuckWait = (f: PrFacts): Wait | null => {
   }
   const cf = cifixBucket(f);
   if (cf === "unapproved") return PUSH_OFF;
-  if (cf === "pushes-used") return ASKS_AGAIN;
   // A finished formatter run or lint task whose patch may not be delivered.
   const undelivered = f.pushable ? (pushAllowed(f, "cifix") ? null : PUSH_OFF) : f.quiet ? RED_CI : f.repoFacts.commentApproved ? null : COMMENT_OFF;
   const linted = cf === "linting" && f.lint.some((l) => l.step === "cifix" && l.ended);
@@ -809,8 +789,7 @@ export function decidePr(f: PrFacts, pass: PassFacts = NO_PASS): Plan {
   // Merge the base branch into a conflicting PR, or ask the contributor.
   if (f.conflict && f.conflict.baseOk && f.mergeable === "CONFLICTING" && fixAllowed(f) && (mx || (r && takeReview && r.head === f.head && !r.stale)) && !f.draft && !held && !f.inActiveBatch) {
     // No push to a PR whose maintainer asked for changes: those come first.
-    // Nor once the pushes of ours that the merge approval allows are used: its person is asked first.
-    if ((f.conflict.bucket === "merge" && !f.changesRequested && !pushesUsed(f)) || f.conflict.bucket === "ask") actions.push(act("conflict", f.head, { bucket: f.conflict.bucket }));
+    if ((f.conflict.bucket === "merge" && !f.changesRequested) || f.conflict.bucket === "ask") actions.push(act("conflict", f.head, { bucket: f.conflict.bucket }));
   }
 
   // An implementation PR goes back to its session for the review's fixes and red CI, after a conflict is merged away.

@@ -32,7 +32,7 @@ afterEach(async () => {
   // An older image reads the text: it stands for the same blocker as the code.
   for (const l of current ? await current.rows("SELECT reason, reason_code FROM preapprovals WHERE reason IS NOT NULL") : []) {
     assert.ok(l.reason_code, String(l.reason));
-    assert.equal(legBlocker(l.reason_code as StopCode), legBlocker(stopCodeOf(String(l.reason))), String(l.reason));
+    assert.deepEqual(legBlocker({ reason: "x", code: l.reason_code as StopCode }).blocker, legBlocker({ reason: "x", code: stopCodeOf(String(l.reason)) }).blocker, String(l.reason));
   }
   current?.close();
 });

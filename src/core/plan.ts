@@ -302,8 +302,6 @@ export type PrFacts = {
   pushChain: string[];
   /** For a conflicting open PR: what fix-up does and the base branch. */
   conflict: { bucket: string; base: string; /** The base branch name is one fix-up may merge. */ baseOk: boolean; /** When a capped bucket ends, or an ask-retry bucket's comment is due again (ms). */ until?: number; } | null;
-  /** On a PR approved for merge: our pushes that changed its own diff since its person approved it or last went on with it (core/evidence.ts diffPushesSince). */
-  ownPushes?: number;
   /** Member of a merge batch that is checking or open, at any head. */
   inActiveBatch: boolean;
   /** Fix-up of a take-fix review at the current head: its usable fixes, the tries used (since the merge approval on a PR approved for merge) and the final rows recorded at the head (fixups.state, no source). */

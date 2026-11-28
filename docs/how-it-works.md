@@ -64,7 +64,7 @@ Nothing runs on an item nobody picked, except the small bug fixes above. These w
 
 - **Starting an item**, or leaving it.
 - **The recommendation** of a started item that is not approved for merge.
-- **A blocker** of an approved item: a major finding, someone else's commits that the review finds beyond what was approved, a step that failed twice, a fix larger than agreed. Someone else's commits are reviewed first; the approval stays.
+- **A blocker** of an approved item: someone else's commits that the review finds beyond what was approved, a step that failed twice, or a fix AutoCraft could not make. Everything else the merge needs, AutoCraft fixes first, as if the approver had pressed the merge button. Someone else's commits are reviewed first; the approval stays.
 - **A merge** outside the merge rules.
 - **A close** that could not be made.
 

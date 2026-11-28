@@ -169,7 +169,7 @@ function headerFor(c: Ctx, wf: ItemWorkflow | null, rows: ItemTraceRows, leg: Ba
   return { status: s.headline, state: STATE[wf.state], next: yes ?? (at >= 0 ? steps[at + 1]?.label ?? null : null) };
 }
 
-const question = (rec: Recommendation): string => yesClause(rec) ?? t("Reply yes, or write what to do instead.");
+const question = (rec: Recommendation): string => yesClause(rec) ?? t("Reply with what to do.");
 
 /** The open question of the item's workflow and who it asks; none for a workflow that asks nobody (the automatic merge rule's). */
 function openOf(c: Ctx, wf: ItemWorkflow | null): ItemConversation["open"] {

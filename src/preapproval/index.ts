@@ -161,6 +161,9 @@ export class PreapprovalRefused extends Error {
   constructor(message: string, why: "active" | "draft" | null = null) { super(message); this.active = why === "active"; this.draft = why === "draft"; }
 }
 
+/** A refusal that a moment may lift: GitHub has not answered yet on what the step needs. */
+export class NotYet extends Error {}
+
 /** Why a leg pinned to a head (a command's) was refused: the PR has another head now. */
 export const HEAD_CHANGED = "the PR changed after your comment; comment again";
 
@@ -204,7 +207,7 @@ export async function checkFixup(db: Db, o: { repo: string; number: number; by: 
   const may = mayPush({ kind: "fixup", repoApproval: null, workflow: null, operatorFix: true, by });
   if (!may.ok) throw new Error(may.why);
   const writes = await ensureAuthorWrites(db, repo, number, it.head_repo);
-  if (writes === "unknown") throw new Error("the author's permission on the repository could not be read yet; try again");
+  if (writes === "unknown") throw new NotYet("the author's permission on the repository could not be read yet; try again");
   if (!pushable(it.head_repo, repo, checks?.head_oid === head ? checks.maintainer_can_modify : null, it.head_ref, await longLivedOf(db, repo), false, writes === "yes")) throw new Error("can't push to the contributor's branch");
   if (!await operatorTriesLeft(db, repo, number)) throw new Error("the fix-up tries for this PR are used up");
   if (await queuedOperatorFix(db, repo, number, head)) throw new Error(`a fix-up of ${ref} is already queued`);
@@ -224,8 +227,9 @@ export async function checkFixup(db: Db, o: { repo: string; number: number; by: 
 /**
  * Checks a merge leg with no fix-up: it starts in `review` at the current head, so the PR merges only after a take review, a clean
  * pre-merge review and green CI there. The approval says the change is wanted, so an unsure review does not stop it, and a take-fix
- * review's fixes are made by the pipeline's fix-up, whose push is reviewed again; a pre-merge defect, a red head the CI fix cannot
- * repair or a fix-up that cannot run stops the leg and the workflow asks.
+ * review's fixes are made by the pipeline's fix-up, whose push is reviewed again; a review that says hold or close, a pre-merge defect past its
+ * fix-up rounds or a failed verification stops the leg and the workflow has it fixed (src/workflow/advance.ts fixFirst); a red head the CI fix
+ * cannot repair or a fix-up that cannot run stops the leg and the workflow asks.
  *
  * The workflow the leg belongs to puts the PR in the pipeline's scope and is its merge approval, so neither is checked. `head`, when
  * given, is the only head it may start at: the one the person saw (a command's comment-time head). `fromHead`: the head the person
@@ -656,10 +660,13 @@ async function advance(db: Db, p: Row, ctx: LegContext | "ended" | "unlinked", p
     return;
   }
   // queued: the merge queue owns it. A new review that asks for fixes, sure or not, of a PR approved for merge: the pipeline's fix-up runs under
-  // that approval, and its push is the leg's own again. A batch that holds the PR, or a merge of the repo under way, goes first.
-  if (!reviewed || keptVerdict(p, head, pf) !== "take-fix" || (await reviewAt(p, leg, head, pf, wake)).kind !== "takefix") return;
+  // that approval, and its push is the leg's own again. A new review that says hold or close takes it back to review, which stops for its fix
+  // (src/workflow/advance.ts fixFirst). A batch that holds the PR, or a merge of the repo under way, goes first.
+  if (!reviewed) return;
+  const r = keptVerdict(p, head, pf) === "take" ? null : accepted(await reviewAt(p, leg, head, pf, wake));
+  if (r?.kind !== "takefix" && r?.kind !== "bad") return;
   const left = await db.write(async () => !await inActiveBatch(db, p.repo, p.number) && !await mergeRunning(db, p.repo) && await moveRaw(db, p, "review", {}));
-  if (left) await say(db, p.repo, p.number, `The review of ${headName(p)} now asks for fixes; the pipeline's fix-up comes first.`);
+  if (left) await say(db, p.repo, p.number, r.kind === "takefix" ? `The review of ${headName(p)} now asks for fixes; the pipeline's fix-up comes first.` : `The review of ${headName(p)} now asks for changes before the merge; they are fixed first.`);
 }
 
 /** Ends fix-up requests the planner can no longer work (someone else's push moved the PR's head, it closed, the push is not possible), with the reason in the thread. Requests of a pre-approved merge end with it. */

@@ -106,7 +106,7 @@ export function runnerHoldOf(v: RemoteView, login: string): RunnerWait {
 }
 
 const HOLD_TEXT: Record<RunnerHold, string> = { offline: tk("offline"), "usage-limit": tk("usage limit"), "cooling-off": tk("cooling off"), "not-ready": tk("not ready") };
-const hhmm = (ms: number): string => new Date(ms).toISOString().slice(11, 16);
+export const hhmm = (ms: number): string => new Date(ms).toISOString().slice(11, 16);
 
 /**
  * The line of work that waits for one person's Task Runner (waitingOnIn, or loginWaitIn's renewal), in the words of the item's state

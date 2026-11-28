@@ -319,6 +319,7 @@ export const toolContent = (r: { text: string; images?: readonly { data: string;
 export type Release = {
   /** Why the helper gives the lease back, shown on the call. */ reason: string;
   /** Setting up the call's files or slot failed on the helper (a fetch, git, disk): the same login may take the call again after SETUP_RETRY_MS instead of RELEASE_SKIP_MS (src/remote/calls.ts). */ setup?: boolean;
+  /** The helper process is stopping (a signal, a restart): the call goes back with no skip of its login, so any of that login's runners may take it again at once; helpers from 1.5.5. */ stopped?: boolean;
 };
 
 /** The machine a Task Runner runs on, as Node's `os.hostname()`, `process.platform` and `process.arch` give it. */

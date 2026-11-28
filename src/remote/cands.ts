@@ -4,6 +4,17 @@
 import type { QueuedCall, QueueSnapshot } from "../data/runners/index.ts";
 import { sortQueue } from "../agents/call.ts";
 import { claimClass } from "./claim-class.ts";
+import { scaled } from "./time-scale.ts";
+
+/** A call this login released is not offered to it again for this long (its helper could not run it). */
+export const RELEASE_SKIP_MS = scaled(10 * 60_000);
+
+/** The login a give-back keeps the call from (lowercase) and until when; null when no give-back's wait is running. */
+export function releaseSkip(r: Pick<QueuedCall, "releasedBy" | "releasedAt" | "releaseWaitMs">, nowMs: number): { login: string; until: number } | null {
+  if (r.releasedBy === null || r.releasedAt === null) return null;
+  const until = r.releasedAt + (r.releaseWaitMs ?? RELEASE_SKIP_MS);
+  return until >= nowMs ? { login: r.releasedBy, until } : null;
+}
 
 /** A queued call with the column-named fields the shared rules read. */
 export type Cand = QueuedCall & { prompt_id: string; parent_id: number | null; sticky_login: string | null; seen_at: number };

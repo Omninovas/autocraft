@@ -38,7 +38,7 @@ import { WORKSPACE_SERVER } from "../build/workspace-tools.ts";
 import { NO_TAKER_SKIP, skipItem } from "../runner/leases.ts";
 import { tierTaker } from "./takers.ts";
 import { heldForOwner, startedOf, tierTokens, type StartedCalls } from "./started.ts";
-import { orderedOf, type Cand } from "./cands.ts";
+import { orderedOf, releaseSkip, type Cand } from "./cands.ts";
 import { pickCounts } from "./picks-rules.ts";
 import { fastLaneFits, judges, roleFits, runnerTakes, sameLogin } from "./rules.ts";
 import { itemFilterIn, settingsOf, type RemoteView } from "./view.ts";
@@ -67,8 +67,7 @@ export const WORKSPACE_HELPER = "1.3.7";
 type InteractiveMode = "lane" | "off" | "legacy";
 /** Where a claim's bound calls go (claimOrder). */
 type BoundCalls = "only" | "with" | "without";
-/** A call this login released is not offered to it again for this long (its helper could not run it). */
-export const RELEASE_SKIP_MS = scaled(10 * 60_000);
+export { RELEASE_SKIP_MS } from "./cands.ts";
 /**
  * The skip after a give-back for a local setup failure (Release.setup: a fetch, git or disk error on the helper): such a failure is
  * usually transient, and the releasing runner may be the only one allowed on the repo. At most the call's attempts give-backs get it.
@@ -310,7 +309,7 @@ function claimOrderAll(q: ReturnType<typeof orderedOf>, reads: OrderReads, calle
   const { manual, skip, items, started, pickers } = reads;
   const login = caller.login.toLowerCase();
   const live = (r: Cand): boolean => r.seen_at >= nowMs - CALLER_STALE_MS;
-  const released = (r: Cand): boolean => r.refusedToken === caller.tokenId || (r.releasedBy === login && r.releasedAt !== null && r.releasedAt >= nowMs - (r.releaseWaitMs ?? RELEASE_SKIP_MS));
+  const released = (r: Cand): boolean => r.refusedToken === caller.tokenId || releaseSkip(r, nowMs)?.login === login;
   const fits = (r: Cand): boolean => live(r) && !released(r) && tiers.has(r.tier) && (!repos || r.repos.every((x) => repos.has(x)));
   const fast = (r: Cand): boolean => !fastLane || fastLaneFits(r);
   const sessions = new Set(sessionIds);
@@ -829,15 +828,16 @@ function refusalRetry(v: RemoteView, l: LiveLease): RefusalRetry {
 }
 
 /**
- * The helper gives the lease back (it could not prepare or start the run): the call returns to the queue without using an attempt and is
- * not offered to that login for RELEASE_SKIP_MS, or for SETUP_RETRY_MS after a setup failure while the call has had fewer such short waits
- * than attempts. False when the lease is gone.
+ * The helper gives the lease back (it could not prepare or start the run, or it is stopping): the call returns to the queue without using an
+ * attempt and is not offered to that login for RELEASE_SKIP_MS, or for SETUP_RETRY_MS after a setup failure while the call has had fewer such
+ * short waits than attempts. A give-back because the helper is stopping (Release.stopped) skips nobody. False when the lease is gone.
  */
 export async function releaseCall(db: Db, secret: string | undefined, raw: unknown, nowMs: number = Date.now()): Promise<boolean> {
   const l = await liveLease(db, secret, nowMs);
   if (!l) return false;
   const body = raw as Release | undefined;
   const reason = progressLine(body?.reason) ?? "released by the helper";
+  if (body?.stopped === true) return await runners.returnLease(db, l, `released by the helper: ${reason}`, { usage: null }, nowMs);
   const setupRetry = body?.setup === true && l.setupRetries < l.maxAttempts;
   return await runners.releaseLease(db, l, `released by the helper: ${reason}`, nowMs, { ms: setupRetry ? SETUP_RETRY_MS : null, setupRetry });
 }

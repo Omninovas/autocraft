@@ -488,6 +488,24 @@ describe("user-local remote calls", async () => {
     assert.equal((await ask)?.text, "after the retries");
   });
 
+  test("a call given back because its helper is stopping is the same user's again at once and uses nothing; a give-back for another reason keeps the skip", async () => {
+    const ask = askClaude("review.opus", "opus", SAMPLE_OPUS_PRS, db);
+    let lease = (await leaseFor("bob"))!;
+    const id = lease.id;
+    const before = (await db.get(db.k.selectFrom("remote_calls").select(["attempt", "setup_retries", "released_by"]).where("id", "=", id)))!;
+    assert.equal(await releaseCall(db, lease.secret, { reason: "stopped on the helper", stopped: true }), true);
+    assert.deepEqual({ ...await db.get(db.k.selectFrom("remote_calls").select(["attempt", "setup_retries", "released_by"]).where("id", "=", id)) }, { ...before });
+    const again = (await claimCall(db, callers.bob!, claim(), canWrite)).lease;
+    assert.equal(again?.id, id, "the restarted runner takes it again");
+    assert.equal(await releaseCall(db, again!.secret, { reason: "the provider refused the run for its usage limit" }), true);
+    assert.equal((await claimCall(db, callers.bob!, claim(), canWrite)).lease, null, "an ordinary give-back keeps the skip");
+    await db.run(db.k.updateTable("remote_calls").set((eb) => ({ released_at: eb("released_at", "-", RELEASE_SKIP_MS + 1000) })).where("id", "=", id));
+    dropQueueCache(db);
+    lease = (await leaseFor("bob"))!;
+    await done(lease.secret, "after the restart");
+    assert.equal((await ask)?.text, "after the restart");
+  });
+
   test("an Opus review gets its task budget when a Task Runner whose Claude Code takes the flag leases it, and not from the queued call or for an older one", async () => {
     const REVIEW = JSON.stringify({ verdict: "take", summary: "s", why: "w", public: { summary: "ok", points: [] } });
     for (const [version, budget] of [["2.1.323", true], ["2.1", false]] as const) {

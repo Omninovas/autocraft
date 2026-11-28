@@ -42,7 +42,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { gzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 
-export const HELPER_VERSION = "1.5.4";
+export const HELPER_VERSION = "1.5.5";
 
 // ---------------------------------------------------------------------------
 // Wire format: a copy of src/remote/protocol.ts (the helper is served alone, so it keeps its own).
@@ -179,7 +179,7 @@ const HEARTBEAT_MS = scaled(HEARTBEAT_S * 1000), PREPARE_MAX_MS = scaled(PREPARE
  *   | { ok: false, error: string, usage?: Usage, durationMs: number, refused?: boolean, stopReason?: string, subtype?: string }} Submit
  */
 /** @typedef {{ accepted: boolean, reason?: string }} SubmitReply */
-/** @typedef {{ reason: string, setup?: boolean }} Release */
+/** @typedef {{ reason: string, setup?: boolean, stopped?: boolean }} Release */
 
 // ---------------------------------------------------------------------------
 // Harness adapters: `claudeAdapter` and `codexAdapter`, listed in ADAPTERS.
@@ -3088,6 +3088,9 @@ async function claimOnce(cfg, slot, fastLane = false, requestId = newClaimId(), 
   return reply;
 }
 
+/** The give-back reason when the helper process is stopping (a signal): it says nothing about the call or the runner. */
+const STOPPING = "stopped on the helper";
+
 /**
  * Runs one claimed lease to its end: heartbeats from the start, bundle, mounts, sandboxed harness, submit.
  * Returns the status line; never throws. `slotHeld`: the caller holds the lease's slot (macOS).
@@ -3132,15 +3135,16 @@ async function runLease(cfg, id, opt = {}) {
    * The helper's own fault, not the call's: the call goes back to the queue without using an attempt.
    * @param {string} reason @param {RunHold} [hold] the helper can take no call for a while @param {boolean} [noStrike] RunStatus.noStrike
    * @param {boolean} [setup] setting up the files or the slot failed here (Release.setup): this helper may take the call again soon
+   * @param {boolean} [stopped] the helper is stopping (Release.stopped): any runner of this login may take the call again at once
    */
-  const giveBack = async (reason, hold, noStrike, setup) => {
+  const giveBack = async (reason, hold, noStrike, setup, stopped) => {
     /** @type {Release} */
-    const body = { reason: redact(reason).slice(0, 300), ...(setup && { setup: true }) };
+    const body = { reason: redact(reason).slice(0, 300), ...(setup && { setup: true }), ...(stopped && { stopped: true }) };
     try { await call(ROUTES.release, body); } catch (e) { return undelivered(`the release (${reason})`, e); }
     return end("released", `released: ${lease.title}: ${reason}`, hold, noStrike);
   };
   /** Why the preparation stopped, when one of its signals did. */
-  const prepStopped = () => (opt.signal?.aborted ? "stopped on the helper" : prepTimeout.aborted ? `preparing took longer than ${(PREPARE_MAX_MS - 2 * RETRY_MARGIN_MS) / 60_000} min` : null);
+  const prepStopped = () => (opt.signal?.aborted ? STOPPING : prepTimeout.aborted ? `preparing took longer than ${(PREPARE_MAX_MS - 2 * RETRY_MARGIN_MS) / 60_000} min` : null);
   /** @type {string[]} */
   const tokens = [];
   let releaseSlot = () => {};
@@ -3195,13 +3199,13 @@ async function runLease(cfg, id, opt = {}) {
     taskDir = mkdtempSync(join(cacheDir(), "tasks", `${b.callId}-`));
     const late = adapter.tokenFor && (() => { const t = adapter.tokenFor?.(cfg, b.timeoutSeconds); return t && "problem" in t && t.problem === CLAUDE_LOGIN_EXPIRES ? t.problem : null; });
     const out = await execute(b, { adapter, bin: d.bin, token: runToken, model, taskDir, lease, root: lease.root ?? "", ...(lease.slot !== undefined && { slot: lease.slot }), ...(opt.signal && { signal: opt.signal }), prep, beat, ...(late && { late }) });
-    if ("giveBack" in out) { const stopped = prepStopped(); return await giveBack(stopped ?? out.giveBack, undefined, !stopped && out.noStrike, !stopped && out.setup); }
+    if ("giveBack" in out) { const stopped = prepStopped(); return await giveBack(stopped ?? out.giveBack, undefined, !stopped && out.noStrike, !stopped && out.setup, stopped === STOPPING); }
     if ("fail" in out) return await fail(out.fail, out.usage);
     const { r, reply, tools } = out;
     if (r.gone) return lost();
     const transcript = b.transcriptAfter && r.events ? transcriptOf(r.events) : undefined;
     if (r.timedOut) return await fail(`timed out after ${b.timeoutSeconds} s`, reply.usage, false, reply, transcript);
-    if (r.stopped) return await giveBack("stopped on the helper");
+    if (r.stopped) return await giveBack(STOPPING, undefined, undefined, undefined, true);
     if (!reply.ok) {
       // The provider's usage limit: the call goes back without using an attempt, and the helper parks until the reset.
       const refusal = parseRefusal(`${reply.error ?? ""}\n${r.stderr}`);
@@ -3233,7 +3237,7 @@ async function runLease(cfg, id, opt = {}) {
     return end("submitted", `submitted: ${lease.title}, ${kTokens(tokensOf(usage))} tokens`);
   } catch (e) {
     if (e instanceof Gone || beat.gone.aborted) return lost();
-    if (beat.runStart === null) { const stopped = prepStopped(); return await giveBack(stopped ?? `preparing failed: ${msg(e)}`, undefined, undefined, !stopped); }
+    if (beat.runStart === null) { const stopped = prepStopped(); return await giveBack(stopped ?? `preparing failed: ${msg(e)}`, undefined, undefined, !stopped, stopped === STOPPING); }
     return await fail(msg(e));
   } finally {
     beat.stop();

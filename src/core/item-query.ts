@@ -15,8 +15,8 @@ export type ItemQuery = { terms: QueryTerm[]; text: string; numbers: number[]; s
 export const SORTS: readonly SortKey[] = ["updated", "created", "comments", "priority", "discord"];
 export const DEFAULT_SORT: SortKey = "updated";
 
-/** `is:` flags beyond type and state. `outside`: the author is not an owner, member or collaborator; `mine`: I started, approved, held or answered it. */
-export const FLAGS = ["draft", "outside", "mine", "asked", "approved", "duplicate", "security", "stuck", "outside-held"] as const;
+/** `is:` flags beyond type and state. `draft`: an open draft pull request; `ready`: an open pull request that is not a draft (`draft:true` and `draft:false` are the same terms); `outside`: the author is not an owner, member or collaborator; `mine`: I started, approved, held or answered it. */
+export const FLAGS = ["draft", "ready", "outside", "mine", "asked", "approved", "duplicate", "security", "stuck", "outside-held"] as const;
 /** Flags only operators and maintainers may filter by. */
 export const STAFF_FLAGS: readonly string[] = ["security", "stuck"];
 /** Qualifiers only operators and maintainers may filter by: a review verdict says something about a quiet security pull request. */
@@ -131,6 +131,12 @@ export function parseItemQuery(q: string): ItemQuery {
         continue;
       }
       terms.push({ key: got[0]!.key, values: got.map((g) => g!.value), not });
+      continue;
+    }
+    if (name === "draft") {
+      const v = raw.toLowerCase();
+      if (v === "true" || v === "false") terms.push({ key: "flag", values: [v === "true" ? "draft" : "ready"], not });
+      else unknown.push(tok);
       continue;
     }
     if (name === "no") {

@@ -164,7 +164,8 @@ function termExpr(db: Db, eb: kx.AnyEb, scope: BrowseScope, t: QueryTerm): Expre
     }));
     case "flag": return eb.and(vs.map((v): Expression<SqlBool> => {
       switch (v) {
-        case "draft": return eb("x.is_draft", "=", 1);
+        case "draft": return eb.and([eb("x.kind", "=", "pr"), eb("x.state", "=", ITEM_STATE.open!), eb("x.is_draft", "=", 1)]);
+        case "ready": return eb.and([eb("x.kind", "=", "pr"), eb("x.state", "=", ITEM_STATE.open!), eb.or([eb("x.is_draft", "is", null), eb("x.is_draft", "!=", 1)])]);
         case "outside": return eb("x.outside", "=", 1);
         case "mine": return mine(db, eb, scope.login);
         case "asked": return eb("x.asks_me", "=", 1);

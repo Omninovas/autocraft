@@ -80,7 +80,7 @@ One list over every item of the visible repos, narrowed to the picked project. T
 
 | Qualifier | Values |
 |---|---|
-| `is:` | `pr`, `issue`, `open`, `closed`, `merged`, `draft`, `outside` (author is not an owner, member or collaborator), `mine` (I started, approved, held or answered it), `asked` (its open question is mine), `approved` (approved for merge), `duplicate`, `outside-held`; operators and maintainers also `security`, `stuck` |
+| `is:` | `pr`, `issue`, `open`, `closed`, `merged`, `draft` (open draft pull requests; `draft:true` is the same), `ready` (open pull requests that are not drafts; `draft:false`), `outside` (author is not an owner, member or collaborator), `mine` (I started, approved, held or answered it), `asked` (its open question is mine), `approved` (approved for merge), `duplicate`, `outside-held`; operators and maintainers also `security`, `stuck` |
 | `label:` `author:` `repo:` `area:` | names; `area:none` |
 | `priority:` | `P0`–`P4` (the rated level) |
 | `kind:` | classification: `bug`, `feature`, `perf`, `extra`, `plugin`, `infra` |

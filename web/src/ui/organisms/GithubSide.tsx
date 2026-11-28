@@ -1,14 +1,14 @@
 // The GitHub side, drawn like GitHub's own sections. AutoCraft's writes carry a brand-blue edge, the identity they were made as, and a link to the run.
 import { useState } from "react";
 import { CheckCircleIcon, CircleNotchIcon, GitCommitIcon, GitMergeIcon, TagIcon, XCircleIcon, ChatCircleIcon, UploadSimpleIcon, EyeIcon, CircleIcon } from "@phosphor-icons/react";
-import type { CiState, GithubEvent, GithubTab, ItemPageData } from "../../../api/types";
-import { Avatar } from "../../../ui/atoms/Avatar";
-import { MessageTime } from "../../../ui/atoms/MessageTime";
-import { PrBuildLine } from "../../../ui/molecules/PrBuildLine";
-import { Markdown } from "../../../ui/molecules/Markdown";
-import { cn } from "../../../ui/cn";
-import { Tabs } from "../../../ui/molecules/Tabs";
-import { clock, num } from "../../../lib/format";
+import type { CiState, GithubEvent, GithubTab, ItemPageData } from "../../api/types";
+import { Avatar } from "../atoms/Avatar";
+import { MessageTime } from "../atoms/MessageTime";
+import { PrBuildLine } from "../molecules/PrBuildLine";
+import { Markdown } from "../molecules/Markdown";
+import { cn } from "../cn";
+import { Tabs } from "../molecules/Tabs";
+import { clock, num } from "../../lib/format";
 
 const TABS: [GithubTab, string][] = [["conversation", "Conversation"], ["commits", "Commits"], ["checks", "Checks"], ["files", "Files"]];
 const EVENT_ICON: Record<GithubEvent["type"], typeof TagIcon> = { opened: CircleIcon, comment: ChatCircleIcon, review: EyeIcon, label: TagIcon, push: UploadSimpleIcon, merged: GitMergeIcon, closed: XCircleIcon };

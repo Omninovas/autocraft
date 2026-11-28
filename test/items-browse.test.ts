@@ -95,3 +95,36 @@ test("is:draft matches only open draft pull requests, is:ready only open non-dra
     await db.close();
   }
 });
+
+test("items: lists exactly the named items of tracked repos; another owner's repo of that name and unknown items match nothing", async () => {
+  const db = await connectDb(":memory:");
+  try {
+    const item = (repo: string, number: number) => ({
+      repo, number, kind: "issue", state: "OPEN", title: `t${number}`, author: "ann", author_association: "NONE", labels: "[]", comments_count: 0, created_at: at(number), updated_at: at(number),
+    });
+    await db.run(db.k.insertInto("main.items").values([
+      item("app", 1), item("app", 2), item("app", 3), item("app", 4), item("app", 5), item("other", 1),
+      // Synced before the author type was stored: a collaborator, and a bot known only by its login.
+      { ...item("app", 6), author: "cleo", author_association: "COLLABORATOR", author_type: null },
+      { ...item("app", 7), author: "renovate[bot]", author_association: "NONE", author_type: null },
+    ]));
+    const scope = { repos: ["app"], hidden: Object.assign(["other"], { visible: ["app"] }), staff: false, login: "ann" };
+    const numbers = async (q: string, s: typeof scope & { insiders?: string[] } = scope) =>
+      (await loadBrowsePage(db, s, parseItemQuery(q), { offset: 0, limit: 50, normalWeight: 5 })).rows.map((r) => `${r.repo}#${Number(r.number)}`).sort();
+    assert.deepEqual(await numbers("items:app/2,storytold/app/4,someone-else/app/5,app/999,missing/1,other/1"), ["app#2", "app#4"]);
+    // A pasted list keeps the items that read; only the others are not applied.
+    const mixed = parseItemQuery("items:app/2,not-a-ref,app/3");
+    assert.deepEqual(mixed.terms[0]?.values, ["app/2", "app/3"]);
+    assert.deepEqual(mixed.unknown, ["items:not-a-ref"]);
+    const team = async (n: number, s: typeof scope & { insiders?: string[] } = scope) =>
+      Number((await loadBrowsePage(db, s, parseItemQuery(`items:app/${n}`), { offset: 0, limit: 50, normalWeight: 5 })).rows[0]?.team);
+    assert.equal(await team(6), 1, "a collaborator with no stored author type is on the team");
+    assert.equal(await team(7), 0, "a bot is not");
+    assert.deepEqual(await numbers("is:outside items:app/6,app/7"), [], "neither is outside");
+    // Operators and maintainers are on the team whatever GitHub's association says.
+    assert.equal((await numbers("is:outside items:app/1")).length, 1);
+    assert.deepEqual(await numbers("is:outside items:app/1", { ...scope, insiders: ["ann"] }), []);
+  } finally {
+    await db.close();
+  }
+});

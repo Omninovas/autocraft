@@ -3,17 +3,17 @@
 // The view follows new entries only while the reader is at the bottom; otherwise it offers "New messages".
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "@phosphor-icons/react";
-import { t } from "../../../../../../src/i18n/index.ts";
-import type { ChatEntry, ItemConversation as Conversation } from "../../../../api/types";
-import { AutoCraftMessage, AutoCraftTurn } from "../../../../ui/molecules/chat/AutoCraftMessage";
-import { ChatBubble, clipName, VEILED } from "../../../../ui/molecules/chat/ChatBubble";
-import { ChatComposer } from "../../../../ui/molecules/chat/ChatComposer";
-import { DiscordLine } from "../../../../ui/molecules/chat/DiscordLine";
-import { GithubLine } from "../../../../ui/molecules/chat/GithubLine";
-import { FOLD_FROM, WorkGroup, WorkRow } from "../../../../ui/molecules/chat/WorkRow";
-import { QueuedLine } from "../../../../ui/molecules/chat/QueuedLine";
-import { RunnerLine } from "../../../../ui/molecules/chat/RunnerLine";
-import { WorkingLine } from "../../../../ui/molecules/chat/WorkingLine";
+import { t } from "../../../../src/i18n/index.ts";
+import type { ChatEntry, ItemConversation as Conversation } from "../../api/types";
+import { AutoCraftMessage, AutoCraftTurn } from "../molecules/chat/AutoCraftMessage";
+import { ChatBubble, clipName, VEILED } from "../molecules/chat/ChatBubble";
+import { ChatComposer } from "../molecules/chat/ChatComposer";
+import { DiscordLine } from "../molecules/chat/DiscordLine";
+import { GithubLine } from "../molecules/chat/GithubLine";
+import { FOLD_FROM, WorkGroup, WorkRow } from "../molecules/chat/WorkRow";
+import { QueuedLine } from "../molecules/chat/QueuedLine";
+import { RunnerLine } from "../molecules/chat/RunnerLine";
+import { WorkingLine } from "../molecules/chat/WorkingLine";
 
 type Said = Extract<ChatEntry, { t: "said" }>;
 type Reply = Extract<ChatEntry, { t: "reply" }>;
@@ -89,11 +89,13 @@ interface Props {
   blockedReason?: string;
   /** Rows with their own controls (holds, paused steps), right above the composer. */
   notice?: ReactNode;
+  /** Keeps the composer's unsent text under this key (ChatComposer). */
+  draftKey?: string;
   /** Withdraws the reader's message that waits for Opus; rejects with the reason it failed. */
   onWithdraw?: () => Promise<void>;
 }
 
-export function ItemConversation({ c, onSend, onEvent, onGithub, blockedReason, notice, onWithdraw }: Props) {
+export function ItemConversation({ c, onSend, onEvent, onGithub, blockedReason, notice, onWithdraw, draftKey }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const listEl = useRef<HTMLOListElement>(null);
   const atBottom = useRef(true);
@@ -243,7 +245,7 @@ export function ItemConversation({ c, onSend, onEvent, onGithub, blockedReason, 
         </div>
       )}
       {notice}
-      <ChatComposer open={!!c.open} blocked={c.canReply ? null : (blockedReason ?? t("You can reply when you have write access to this repository"))} onSend={send} />
+      <ChatComposer open={!!c.open} blocked={c.canReply ? null : (blockedReason ?? t("You can reply when you have write access to this repository"))} onSend={send} {...(draftKey ? { draftKey } : {})} />
     </div>
   );
 }

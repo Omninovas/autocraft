@@ -390,9 +390,9 @@ const SCREENSHOTS_9981: ScreenshotRun = {
   ],
 };
 
-const FULL: Record<string, Omit<MockPage, "repo" | "number" | "kind" | "state" | "title" | "author" | "status" | "costUsd" | "stamp" | "header" | "bar"> & { header?: Partial<ItemPageHeader> }> = {
+const FULL: Record<string, Omit<MockPage, "repo" | "number" | "kind" | "state" | "draft" | "title" | "author" | "status" | "costUsd" | "stamp" | "header" | "bar"> & { header?: Partial<ItemPageHeader>; draft?: boolean }> = {
   "photocraft#812": { reviews: { latest: null, earlier: [] }, results: [], history: chatHistory("merged"), github: GITHUB_812 },
-  "designcraft#455": { reviews: { latest: null, earlier: [] }, results: [], history: chatHistory("waiting for an answer"), github: GITHUB_455 },
+  "designcraft#455": { draft: true, reviews: { latest: null, earlier: [] }, results: [], history: chatHistory("waiting for an answer"), github: GITHUB_455 },
   "deckcraft#77": { reviews: { latest: null, earlier: [] }, results: [], history: chatHistory("implementing"), github: GITHUB_77 },
   "designcraft#1484": { prBuild: { headSha: "9f3a1c2", current: true, state: "failed", summary: "test failed with exit code 101", disagree: true, ci: "success", createdAt: at(80), finishedAt: at(35) }, header: HEADER_1484, reviews: REVIEWS_1484, results: RESULTS_1484, history: HISTORY_1484, github: GITHUB_1484 },
   "photocraft#9981": { prBuild: { headSha: "b51e7d0", current: true, state: "running", summary: null, disagree: false, ci: "pending", createdAt: at(12), finishedAt: null }, reviews: REVIEWS_9981, results: RESULTS_9981, history: HISTORY_9981, github: GITHUB_9981, screenshots: [SCREENSHOTS_9981] },
@@ -419,7 +419,7 @@ export function itemPageFor(repo: string, number: number): ItemPageData | null {
   const s = seeds.find((x) => x.repo === repo && x.number === number);
   if (!s) return null;
   const full = FULL[`${repo}#${number}`];
-  const base = { repo, number, kind: s.kind, state: s.state, title: s.title, author: s.author, status: s.status, bar: BARS[`${repo}#${number}`] ?? barFromStatus(s.status), stamp: "mock", header: { ...mockHeader(s.kind), ...full?.header } };
+  const base = { repo, number, kind: s.kind, state: s.state, draft: false, title: s.title, author: s.author, status: s.status, bar: BARS[`${repo}#${number}`] ?? barFromStatus(s.status), stamp: "mock", header: { ...mockHeader(s.kind), ...full?.header } };
   if (full) return withTimeline({ ...base, ...full, header: base.header, costUsd: total(full.history) });
   const history = [hist("h1", s.updated + 20, "Classify", "classified", "Jev", 0), hist("h2", s.updated, s.status.phase, s.status.waiting ?? "done", null, null, "event")];
   return withTimeline({

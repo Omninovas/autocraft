@@ -2543,6 +2543,8 @@ export interface ItemPageData {
   number: number;
   kind: ItemKind;
   state: ItemState;
+  /** PRs: a draft on GitHub; false for issues. */
+  draft: boolean;
   title: string;
   author: string;
   /** Changes when anything the page shows changes; send it back as `since`. */
@@ -2901,8 +2903,10 @@ export interface BrowseRow {
   draft: boolean;
   title: string;
   author: string | null;
-  /** The author is not an owner, member or collaborator of the repo. */
+  /** The author is outside the team: not an owner, member or collaborator of the repo, nor an operator, maintainer or own login. */
   outside: boolean;
+  /** The author is on the team: an owner, member or collaborator of the repo, an operator, maintainer or own login, and no bot. */
+  team: boolean;
   /** GitHub label names. */
   labels: string[];
   priority: PriorityLevel | null;

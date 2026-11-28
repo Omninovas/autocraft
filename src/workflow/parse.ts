@@ -645,6 +645,15 @@ function pullItems(text: string, repo: string | undefined, mark = false): { text
   return { text: out, items, last, marks };
 }
 
+/**
+ * The items a pasted text names, each once and in order: `[owner/]repo#n` and GitHub issue and pull request links anywhere, and `#n`
+ * after one of them or, with `repo`, on its own, also in `<…>` or backticks. A lone number names nothing.
+ */
+export function itemsIn(text: string, repo?: string): ItemRef[] {
+  // Discord wraps links in <…> to stop previews, and Markdown puts refs in backticks.
+  return pullItems(text.replace(/[<>`]/g, " "), repo).items;
+}
+
 /** Items in a list: `owner/name#12`, `name#12`, a GitHub URL, or a bare `#12`/`12` taking the repo before it. */
 function readItems(text: string, repo: string | undefined): { items: ItemRef[]; bad: string[] } {
   const items: ItemRef[] = [];

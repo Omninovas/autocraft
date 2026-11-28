@@ -13,12 +13,12 @@
 // leaves it out and the next pass looks at it again. Each pass first starts the workflows of PRs the automatic merge rule stopped for a
 // person's judgement (auto-stop.ts), so they come back the same way.
 import { withConfig } from "../data/control/index.ts";
-import { loadPatchFacts, type PatchFacts } from "../data/changes/index.ts";
+import { loadOperatorFixResults, loadPatchFacts, type PatchFacts } from "../data/changes/index.ts";
 import { loadImplementFacts, type ImplementFacts } from "../data/implement/index.ts";
 import { loadIssueReviews, type IssueReviewRow } from "../data/issuereview/index.ts";
 import { loadItems } from "../data/mirror/index.ts";
 import { loadReviewRows, type PremergeRow, type ReviewRow } from "../data/review/index.ts";
-import { adoptLegs, hasFixupRequestAt, listWorkflows, loadActions, loadGoOnAt, loadLegs, moveWorkflows, recordEvents, retryActions, type GoneOn, type Preapproval, type WorkflowPatch, type WorkflowRead } from "../data/workflow/index.ts";
+import { adoptLegs, fixupRequestsAt, listWorkflows, loadActions, loadGoOnAt, loadLegs, moveWorkflows, recordEvents, retryActions, type GoneOn, type Preapproval, type WorkflowPatch, type WorkflowRead } from "../data/workflow/index.ts";
 import { loadOwnPushes } from "../data/views/own-pushes.ts";
 import { loadLaneRuns, saveWorkflowFailures, type LaneRun, type WorkflowFailure } from "../data/jobs/index.ts";
 import { isFenced } from "../db/fence.ts";
@@ -174,6 +174,8 @@ const answeredAt = (w: ItemWorkflow, moves: ReadonlyMap<string, readonly Recorde
 /** What an approved item fixes before its merge: a leg end that is a finding (blockers.ts fixesFirst), or a wait of its plan on a failed check of the head. */
 type FixCause = "review-hold" | "review-close" | "premerge-defect" | "verification-failed" | "screenshots";
 const FIX_WAITS: readonly FixCause[] = ["verification-failed", "screenshots"];
+/** Final states of a fix-up try that pushed nothing. */
+const UNFIXED: readonly string[] = ["failed", "rejected", "too-large", "refused", "cannot-push", "push-denied"];
 const FIX_WHAT: Record<FixCause, string> = {
   "review-hold": tk("what the review holds it for"),
   "review-close": tk("what the review would close it for"),
@@ -693,7 +695,16 @@ async function advanceOne(db: Db, pass: Pass, writes: Writes, w0: ItemWorkflow):
   const fixFirst = async (cause: FixCause): Promise<ItemWorkflow["state"] | null> => {
     const stop = async (x: Found, parts: readonly PlanPart[] = plan, rec = blockerRec(x, parts)): Promise<ItemWorkflow["state"] | null> =>
       await block({ ...patch, ...(parts !== plan ? { plan: [...parts] } : {}), blocker: x.blocker, blockerParams: x.params, rec: ask(rec, head), recAt: pass.at, recHead: head }, patch);
-    if (await hasFixupRequestAt(db, w.repo, target, head) || (pass.moves.get(ref) ?? []).some((x) => x.landed && x.from === head && x.to !== head)) return settle(patch);
+    if ((pass.moves.get(ref) ?? []).some((x) => x.landed && x.from === head && x.to !== head && x.at > since)) return settle(patch);
+    const asked = await fixupRequestsAt(db, w.repo, target, head, since);
+    if (asked.length) {
+      // The latest one ended without a push: what it was to fix could not be fixed at this head.
+      const last = (await loadOperatorFixResults(db, asked)).get(asked.at(-1)!);
+      if (!last || !UNFIXED.includes(last.state)) return settle(patch);
+      const tried = await operatorTries(db, w.repo, target, since);
+      const parts = plan.filter((p) => p.premerge && p.state === "planned").map((p) => p.n);
+      return await stop({ blocker: "failed-twice", params: { step: "fix-up", count: tried, reason: t("the fix-up ended without a push") } }, plan, triedEnough(t(FIX_WHAT[cause]), tried, plan, parts));
+    }
     const reviewed = cause === "review-hold" || cause === "review-close";
     if (reviewed && stored && stored.model === null) return await stop({ blocker: "other", params: { reason: unreadReason(stored.reason), round: "too-large" } });
     if (cause === "review-close") return await stop({ blocker: "other", params: { reason: t("the review says to close it") } }, plan, closeRec(stored?.public_summary ?? null, plan));

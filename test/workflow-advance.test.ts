@@ -161,6 +161,26 @@ test("a hold the fix-ups do not resolve asks, after the tries, whether to merge 
   assert.equal(await legState(w), "queued");
 });
 
+test("a fix-up of a screenshot regression that ends without a push asks whether to merge it as it is", async () => {
+  const w = await approvedReview();
+  const db = w.db;
+  const pass = async () => { await advanceWorkflows(db); await untilQuiet(db, [() => advancePreapprovals(db)], 3); await advanceWorkflows(db); };
+  await review(w, { head: "sha1", verdict: "take", at: new Date().toISOString() });
+  await (await w.premerge(1, "clean")).verified(1);
+  await pass();
+  await pause();
+  const at = new Date().toISOString();
+  await db.run(db.k.insertInto("main.screenshot_runs").values({ repo: "app", number: 1, head_sha: "sha1", state: "compared", verdict: "regression", clear: 1, held: 1, comparison: "The handles moved.", created_at: at, finished_at: at }));
+  await pass();
+  const [req] = await w.rows("SELECT id FROM operator_fixups WHERE number = 1 AND from_head = 'sha1'");
+  assert.ok(req, "the regression gets a fix-up");
+  await db.run(db.k.insertInto("main.fixups").values({ repo: "app", number: 1, from_head: "sha1", to_head: null, state: "failed", reason: "the model gave no answer", files: "[]", attempt: 1, created_at: new Date().toISOString(), source: "operator", operator_fix: Number(req!.id) }));
+  await pass();
+  const wf = (await liveWorkflow(db, "app", 1))!;
+  assert.deepEqual([wf.state, wf.blocker], ["blocked", "failed-twice"]);
+  assert.match(wf.rec!.text, /Merge it as it is\?/);
+});
+
 test("a hold written without a model call on an approved PR stops it at once as other, with no fix-up", async () => {
   const w = await approvedReview();
   await review(w, { head: "sha1", verdict: "hold", at: new Date().toISOString() });

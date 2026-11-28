@@ -288,11 +288,12 @@ export async function moveFixupRequests(db: Db, rows: FixupRequestMove[]): Promi
 }
 
 /** Compare-and-set update where `state = 'queued'`: ends the requests and audits each as `operator-fixup` with its reason. Returns the ids ended. */
-/** Whether a fix-up was ever asked for at the PR's head, in any state. */
-export async function hasFixupRequestAt(db: Db, repo: string, number: number, head: string): Promise<boolean> {
+/** The fix-up requests asked for at the PR's head after `since`, in any state, oldest first. */
+export async function fixupRequestsAt(db: Db, repo: string, number: number, head: string, since: string): Promise<number[]> {
   const q = queryDb(db);
   const k = q.k as any;
-  return !!(await q.get(k.selectFrom("main.operator_fixups").select("id").where("repo", "=", repo).where("number", "=", number).where("from_head", "=", head).limit(1)));
+  const rows = await q.all(k.selectFrom("main.operator_fixups").select("id").where("repo", "=", repo).where("number", "=", number).where("from_head", "=", head).where("at", ">", since).orderBy("id")) as { id: number | string }[];
+  return rows.map((r) => Number(r.id));
 }
 
 /** Links the merge leg to the fix-up request that takes the place of its earlier one. */

@@ -60,12 +60,14 @@ export async function loadRunnerBoard(db: Db, now: number, windowMs: number): Pr
   };
 }
 
+type RunnerNameRow = { login: string; label: string | null; machine: Machine | null; private: boolean };
+
 /**
  * Runner credentials by id, expired ones included (revoked ones are gone): owner, label, machine, and whether the owner keeps their runners
  * private on the Live board. 2 statements, 1 RT.
  */
-export async function loadRunnerNames(db: Db, ids: readonly number[]): Promise<Map<number, { login: string; label: string | null; machine: Machine | null; private: boolean }>> {
-  const out = new Map<number, { login: string; label: string | null; machine: Machine | null; private: boolean }>();
+export async function loadRunnerNames(db: Db, ids: readonly number[]): Promise<Map<number, RunnerNameRow>> {
+  const out = new Map<number, RunnerNameRow>();
   if (!ids.length) return out;
   const q = queryDb(db);
   const [rows, kept] = await db.together(() => Promise.all([
@@ -75,6 +77,17 @@ export async function loadRunnerNames(db: Db, ids: readonly number[]): Promise<M
   const hidden = new Set(kept.map((r) => r.login.toLowerCase()));
   for (const r of rows.map(runnerRowOf)) out.set(r.tokenId, { login: r.login, label: r.label, machine: r.machine, private: hidden.has(r.login.toLowerCase()) });
   return out;
+}
+
+/** Runner credentials (expired ones included) labelled `label`, of `login` when given, shaped as loadRunnerNames. 2 statements, 1 RT. */
+export async function loadRunnersByLabel(db: Db, label: string, login?: string): Promise<({ id: number } & RunnerNameRow)[]> {
+  const q = queryDb(db);
+  const [rows, kept] = await db.together(() => Promise.all([
+    q.all(runnerCredentials(db, 0, false).where("t.label", "=", label).$if(login !== undefined, (s) => s.where("t.login", "=", login!))),
+    q.all(q.k.selectFrom("main.user_settings").select("login").where("key", "=", "runner_private").where("value", "=", "1")),
+  ]));
+  const hidden = new Set(kept.map((r) => r.login.toLowerCase()));
+  return rows.map(runnerRowOf).map((r) => ({ id: r.tokenId, login: r.login, label: r.label, machine: r.machine, private: hidden.has(r.login.toLowerCase()) }));
 }
 
 /** The reads of the runner health checks. The thresholds are the caller's (scaled windows live in feature code). */

@@ -6,7 +6,8 @@ import { pickerLogins } from "../../remote/calls.ts";
 import { manualOnly } from "../../remote/manual-only.ts";
 import { pickCall, pickerState, pickRefusal, unpickCall } from "../../remote/picks.ts";
 import { queueView, type QueuedCall } from "../../remote/queue-view.ts";
-import { loadRunnerOwners } from "../../data/access/index.ts";
+import { loadRunnersByLabel } from "../../data/runners/index.ts";
+import { runnerLabelFor } from "../../remote/runner-label.ts";
 import { HttpError } from "../server/util.ts";
 import type { Req } from "../types.ts";
 import { shownMap, withShown } from "./shown.ts";
@@ -52,7 +53,8 @@ async function filterOf(db: Db, req: Req, staff: boolean): Promise<((c: QueuedCa
   if ((person || runner) && !staff) throw new HttpError(403, "operators and maintainers only");
   let whose: Set<string> | null = person ? new Set([person.toLowerCase()]) : null;
   if (runner) {
-    const owners = new Set((await loadRunnerOwners(db, runner)).map((l) => l.toLowerCase()));
+    // Only the runners whose label the reader may see (src/remote/runner-label.ts) name their owners.
+    const owners = new Set((await loadRunnersByLabel(db, runner)).filter((n) => runnerLabelFor(n, req.user.login) !== null).map((n) => n.login.toLowerCase()));
     whose = whose ? new Set([...whose].filter((l) => owners.has(l))) : owners;
   }
   return (c) => (!repo || c.repos.includes(repo)) && (!step || c.step === step)

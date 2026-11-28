@@ -1,9 +1,12 @@
-// Renaming a Task Runner: its owner renames their own and an operator anyone's; nobody else, and the name is trimmed, 1 to 64 characters, and audited.
+// Task Runner names: its owner renames their own and an operator anyone's, nobody else (trimmed, 1 to 64 characters, audited);
+// the Agents page names, and filters by, another person's runner only when that person does not keep their runners private.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { insertRun, listRuns } from "../src/agents/runs.ts";
 import * as runners from "../src/dash/api/runners.ts";
+import { setRunnerPrivate } from "../src/remote/runner-private.ts";
 import { createToken } from "../src/dash/mcp/tokens.ts";
 import { HttpError } from "../src/dash/server/util.ts";
 import type { Req, Role } from "../src/dash/types.ts";
@@ -11,7 +14,7 @@ import { SCRATCH } from "./scratch.ts";
 import { connectDb } from "./helpers/raw-db.ts";
 
 mkdirSync(SCRATCH, { recursive: true });
-const dir = mkdtempSync(join(SCRATCH, "runner-rename-"));
+const dir = mkdtempSync(join(SCRATCH, "runner-names-"));
 after(() => rmSync(dir, { recursive: true, force: true }));
 
 test("a Task Runner is renamed by its owner or an operator only", async () => {
@@ -38,5 +41,25 @@ test("a Task Runner is renamed by its owner or an operator only", async () => {
 
   const rows = await db.prepare("SELECT login, target, details FROM audit WHERE action = 'runner-rename' ORDER BY rowid").all() as { login: string; target: string; details: string }[];
   assert.deepEqual(rows.map((r) => [r.login, r.target, JSON.parse(r.details).from, JSON.parse(r.details).to]), [["alice", "alice", "box-17", "runner-1"], ["olga", "alice", "runner-1", "runner-2"]]);
+  await db.close();
+});
+
+test("a private owner's runner label is shown to and filtered by its owner only", async () => {
+  const db = await connectDb(join(dir, "names.db"));
+  for (const login of ["alice", "bob", "carol"]) await db.run(db.k.insertInto("access").values({ login, role: "maintainer" }));
+  await setRunnerPrivate(db, "bob", true);
+  const run = async (login: string, label: string) => {
+    const tokenId = (await createToken(db, login, label, { kind: "runner" })).row.id;
+    return await insertRun(db, { jobId: null, step: "opus-review", stage: 5, promptId: "review.opus", promptVersion: "1", provider: "claude", model: "opus",
+      items: [{ repo: "photocraft", number: 1 }], prompt: "x", remote: { callId: tokenId, userLogin: login, tokenId, harness: "claude", reportedModel: "opus" } });
+  };
+  const a = await run("alice", "box-a"), b = await run("bob", "box-b");
+  const seen = async (reader: string, runner?: string) =>
+    (await listRuns(db, runner === undefined ? {} : { runner }, [], true, Date.now(), reader)).runs.map((r) => [r.id, r.via?.runner ?? null]);
+
+  assert.deepEqual(await seen("carol"), [[b, null], [a, "box-a"]], "another reader sees the public owner's label, not the private one's");
+  assert.deepEqual(await seen("carol", "box-b"), [], "and cannot find the private runner by its label");
+  assert.deepEqual(await seen("carol", "box-a"), [[a, "box-a"]]);
+  assert.deepEqual(await seen("bob", "box-b"), [[b, "box-b"]], "the owner sees and filters by their own");
   await db.close();
 });

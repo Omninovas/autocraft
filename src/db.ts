@@ -24,6 +24,7 @@ import { featuresRepoOnlySqlite } from "./db/feature-repo-only.ts";
 import { pingsSettledSqlite } from "./db/pings-settled.ts";
 import { holdsToItemsSqlite } from "./db/holds-to-items.ts";
 import { backfillRefusalsSqlite } from "./db/refused-runs.ts";
+import { backfillRunTokensSqlite } from "./db/run-tokens.ts";
 import { chatBackfillSqlite } from "./db/chat-backfill.ts";
 import { ACTIVE_LEG_INDEX, ACTIVE_LEG_STATES, builtAfterCopy, copyStateSqlite, oneActiveLegSqlite } from "./db/state-copy.ts";
 
@@ -513,7 +514,7 @@ export const HISTORY_COPY_SQL = `INSERT INTO main.opus_review_history (repo, num
   WHERE NOT EXISTS (SELECT 1 FROM main.opus_review_history h WHERE h.repo = o.repo AND h.number = o.number AND h.head_oid = o.head_oid AND h.at = o.at)`;
 
 // Bump when migrateValues() or backfill() change what they do.
-const MIGRATION_VERSION = 23;
+const MIGRATION_VERSION = 24;
 
 // Rows written before their column existed.
 function backfill(db: DatabaseSync): void {
@@ -558,6 +559,7 @@ function backfill(db: DatabaseSync): void {
   featuresRepoOnlySqlite(db);
   holdsToItemsSqlite(db);
   backfillRefusalsSqlite(db);
+  backfillRunTokensSqlite(db);
   chatBackfillSqlite(db);
   pingsSettledSqlite(db);
   // Reviews made before snapshots existed count as having read everything up to now: no wave of re-reviews.

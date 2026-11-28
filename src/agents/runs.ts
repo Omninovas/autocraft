@@ -6,8 +6,8 @@ import * as inference from "../data/inference/index.ts";
 import type { HiddenRepos, RunEnd as ModuleRunEnd, RunRow, RunStart as ModuleRunStart } from "../data/inference/index.ts";
 import { loadItemsByBucket } from "../data/jobs/index.ts";
 import { loadShown } from "../data/mirror/index.ts";
-import { loadRunnerNames } from "../data/runners/index.ts";
-import { shownLabel } from "../remote/runner-label.ts";
+import { loadRunnerNames, loadRunnersByLabel } from "../data/runners/index.ts";
+import { runnerLabelFor } from "../remote/runner-label.ts";
 import { scrub } from "../runner/scrub.ts";
 import { WriteBatch } from "./batch.ts";
 import type { Db } from "../db/index.ts";
@@ -61,15 +61,10 @@ type Retries = Awaited<ReturnType<typeof inference.loadRetries>>;
 
 type Names = Awaited<ReturnType<typeof loadRunnerNames>>;
 
-/**
- * The label of the Task Runner that ran a call, as `reader` may see it: their own runners' labels as they are; another person's
- * only when that person does not keep their runners private and the label is not the machine's hostname.
- */
+/** The label of the Task Runner that ran a call, as `reader` may see it (runnerLabelFor). */
 function runnerOf(r: RunRow, names: Names, reader: string | null): string | undefined {
   const n = r.tokenId === null ? undefined : names.get(r.tokenId);
-  if (!n?.label) return undefined;
-  if (reader !== null && n.login.toLowerCase() === reader.toLowerCase()) return n.label;
-  return n.private ? undefined : (shownLabel(n.label, n.machine) ?? undefined);
+  return (n && runnerLabelFor(n, reader)) ?? undefined;
 }
 
 /** `via` and `refusal` go to staff only. */
@@ -124,8 +119,11 @@ export async function listRuns(db: Db, f: AgentRunFilter, hidden: HiddenRepos = 
   if ((f.refused || f.window !== undefined) && !staff) throw new RunQueryError(403, "operators and maintainers only");
   // Who ran a call is shown to staff only, so viewers cannot filter by it either.
   if ((f.person !== undefined || f.runner !== undefined) && !staff) throw new RunQueryError(403, "operators and maintainers only");
-  const { window, ...rest } = f;
-  const { rows, nextCursor } = await inference.listRuns(db, { ...rest, limit: f.limit ?? AGENT_PAGE_DEFAULT, ...(window && { since: sinceOf(window, nowMs) }) }, { hidden, staff });
+  const { window, runner, ...rest } = f;
+  // A runner filter keeps the Task Runners of that label the reader may see the label of; none: no runs.
+  const tokenIds = runner === undefined ? undefined : (await loadRunnersByLabel(db, runner, f.person)).filter((n) => runnerLabelFor(n, reader) !== null).map((n) => n.id);
+  if (tokenIds !== undefined && !tokenIds.length) return { runs: [], nextCursor: null };
+  const { rows, nextCursor } = await inference.listRuns(db, { ...rest, limit: f.limit ?? AGENT_PAGE_DEFAULT, ...(window && { since: sinceOf(window, nowMs) }), ...(tokenIds && { tokenIds }) }, { hidden, staff });
   const [shown, retries, names] = await db.together(() => Promise.all([shownOf(db, rows), staff ? inference.loadRetries(db, rows.filter((r) => r.refusal !== null)) : Promise.resolve(new Map() as Retries), namesOf(db, rows, staff)]));
   return { runs: rows.map((x) => toRun(x, shown, staff, retries, names, reader)), nextCursor };
 }

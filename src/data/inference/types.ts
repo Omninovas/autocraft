@@ -61,7 +61,8 @@ export type ItemRun = RunRow & { toolCount: number; repo: string; number: number
 export type ToolRow = { runId: number; seq: number; tool: string; args: string | null; resultBytes: number | null; isError: boolean; startedAt: string | null; endedAt: string | null; checkId: number | null };
 export type ToolView = Omit<ToolRow, "runId">;
 /** `since`: runs started at or after this ISO time. */
-export type RunFilter = Omit<AgentRunFilter, "account" | "window"> & { since?: string };
+/** `tokenIds`: runs of these Task Runner credentials only. */
+export type RunFilter = Omit<AgentRunFilter, "account" | "window" | "runner"> & { since?: string; tokenIds?: readonly number[] };
 /** Refused runs started in a time range, counted per prompt, first repo, model (as the harness reported it) and Task Runner user. */
 export type RefusalCount = { promptId: string; repo: string | null; model: string; login: string | null; refusal: RunRefusal; n: number };
 /** Texts as stored (`unpackText` reads both forms); null when the viewer is not staff or the run has none. Tool arguments are null for a viewer who is not staff. */

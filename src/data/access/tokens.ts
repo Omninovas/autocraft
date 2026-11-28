@@ -82,12 +82,6 @@ export async function renameRunner(db: Db, id: number, label: string, owner: Log
   });
 }
 
-/** The logins whose runner tokens (expired ones too) carry `label`. 1 statement. */
-export async function loadRunnerOwners(db: Db, label: string): Promise<string[]> {
-  const q = queryDb(db);
-  return (await q.all(q.k.selectFrom("mcp_tokens").select("login").distinct().where("kind", "=", "runner").where("label", "=", label))).map((r) => r.login);
-}
-
 /** One live runner token of the login. */
 export async function loadRunnerTokenOf(db: Db, login: Login, id: number): Promise<{ canAnswer: boolean } | null> {
   const q = queryDb(db);

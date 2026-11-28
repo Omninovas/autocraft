@@ -1,4 +1,3 @@
-// reads: access.mcp_tokens
 // Run reads for pages, the live board, MCP and Discord. Reads that take `vis` apply the hidden-repo test `fragments.runVisible`.
 import type { SelectQueryBuilder } from "kysely";
 import type { Db } from "../../db/index.ts";
@@ -86,9 +85,8 @@ export async function listRuns(db: Db, f: RunFilter, vis: RunVisibility): Promis
     ...(f.state === "finished" ? [eb("r.state", "!=", "running")] : f.state && f.state !== "recent" ? [eb("r.state", "=", f.state)] : []),
     ...(f.step ? [eb("r.step", "=", f.step)] : []),
     ...(f.person ? [eb("r.user_login", "=", f.person)] : []),
-    // A runner by its label (labels are not unique, even per person), through its credential: renamed runners keep their calls.
-    ...(f.runner ? [eb("r.token_id", "in", eb.selectFrom("mcp_tokens as t").select("t.id").where("t.kind", "=", "runner").where("t.label", "=", f.runner)
-      .$if(!!f.person, (w) => w.where("t.login", "=", f.person!)))] : []),
+    // One credential is an ordered scan of agent_runs_token; several a plain IN list.
+    ...(f.tokenIds?.length === 1 ? [eb("r.token_id", "=", f.tokenIds[0]!)] : f.tokenIds ? [eb("r.token_id", "in", [...f.tokenIds])] : []),
     ...(f.refused ? [eb("r.refusal", "is not", null)] : []),
     ...(f.since ? [eb("r.started_at", ">=", f.since)] : []),
   ]);

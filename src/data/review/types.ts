@@ -14,7 +14,8 @@ export type HeadKey = { repo: string; number: number; head: string };
 export type ReviewFinding = { file: string; change: string; title?: string; major?: boolean; /** Absent: blocking (premerge/types.ts). */ blocking?: Blocking };
 export type ReviewRecommendation = { text: string; fix: number[]; merge: boolean; close: boolean };
 export type ReviewWorkflow = {
-  outside_purpose: { lines: number; note: string } | null; recommendation: ReviewRecommendation | null;
+  /** `checked`: the note passed the reply checks at parse (review/opus-parse.ts); a note without it is never filed. */
+  outside_purpose: { lines: number; note: string; checked?: true } | null; recommendation: ReviewRecommendation | null;
   /** Whether the author's commits since the approved head stay within the approval (review/opus-parse.ts). */
   author_commits?: { in_scope: boolean; note: string } | null;
   /** A hold's blocking class (review/opus-parse.ts); absent: blocking. */

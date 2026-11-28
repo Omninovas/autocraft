@@ -245,7 +245,8 @@ export type ReviewFix = { file: string; change: string; title?: string; major?: 
 export type ReviewRecommendation = { text: string; fix: number[]; merge: boolean; close: boolean };
 /** Lines the change has outside what the pull request sets out to do, and the review's one recommendation. */
 export type ReviewWorkflow = {
-  outside_purpose: { lines: number; note: string } | null; recommendation: ReviewRecommendation | null;
+  /** `checked`: the note passed the reference and reply checks when it was parsed; a note stored without it is never filed. */
+  outside_purpose: { lines: number; note: string; checked?: true } | null; recommendation: ReviewRecommendation | null;
   /** Asked only when the author pushed after a person approved the merge (`OpusPr.author_commits`): whether those commits stay within what was approved. */
   author_commits?: AuthorCommits | null;
   /** A hold's blocking class: whether its reason stops the merge of a PR a maintainer approved (class null: it does not, and the reason is filed as a follow-up). Absent counts as blocking. */
@@ -264,12 +265,12 @@ export const RECOMMENDATION_CHARS = 300;
  * dropped (the workflow builds one from the verdict). When the stored numbers differ from the model's, `text` is empty: the sentence
  * named other numbers, so the workflow writes it again.
  */
-export function parseReviewWorkflow(r: Record<string, unknown>, partOf: (n: number) => number | null = (n) => n, keepRec = true, hold?: Blocking): ReviewWorkflow | null {
+export function parseReviewWorkflow(r: Record<string, unknown>, partOf: (n: number) => number | null = (n) => n, keepRec = true, hold?: Blocking, drop: ReadonlySet<string> = new Set()): ReviewWorkflow | null {
   const o = r.outside_purpose as { lines?: unknown; note?: unknown } | null | undefined;
   const lines = o && typeof o === "object" && typeof o.lines === "number" && Number.isFinite(o.lines) && o.lines > 0 ? Math.round(o.lines) : 0;
-  // The note may be filed in the PR's public follow-up issue: one that leaks the reference is not kept.
-  const note = lines && typeof o!.note === "string" && !REFERENCE_LEAK.test(o!.note) ? o!.note : "";
-  const outside = lines ? { lines, note: note.replace(/\s+/g, " ").trim().slice(0, OUTSIDE_NOTE_CHARS) } : null;
+  // The note may be filed in the PR's public follow-up issue: one that leaks the reference or that the reply checks flagged (`drop`) is not kept.
+  const note = lines && typeof o!.note === "string" && !REFERENCE_LEAK.test(o!.note) && !drop.has(o!.note) ? o!.note : "";
+  const outside = lines ? { lines, note: note.replace(/\s+/g, " ").trim().slice(0, OUTSIDE_NOTE_CHARS), checked: true as const } : null;
   const x = r.recommendation as { text?: unknown; fix?: unknown; merge?: unknown; close?: unknown } | null | undefined;
   const text = x && typeof x === "object" && typeof x.text === "string" && x.text.trim() && !REFERENCE_LEAK.test(x.text) ? firstSentence(x.text.replace(/\s+/g, " ").trim()).slice(0, RECOMMENDATION_CHARS) : null;
   const named = text && Array.isArray(x!.fix) ? [...new Set(x!.fix)] : [];
@@ -366,7 +367,7 @@ export function parseOpusReply(text: string, ref: string, last = true, drop: Rea
   return { ref, verdict: outVerdict, sure, reason: words(outReason, OPUS_REASON_WORDS), fixes: outFixes, risks: [...risks, ...notes], workflow: parseReviewWorkflow(r, (n) => {
     const i = verdict === "take-fix" ? src.indexOf(n) : -1;
     return i < 0 || i + shift >= outFixes.length ? null : i + shift + 1;
-  }, outVerdict === verdict || !bad.length, hold), summary: summary.text, why: oneSentence(why.text), public: parsePublic(r.public, drop), conflicts: parseStatementConflicts(r.conflicts, known), claims: listed, blocked_by: outVerdict === "hold" ? parseBlockedBy(r.blocked_by, ref) : [] };
+  }, outVerdict === verdict || !bad.length, hold, drop), summary: summary.text, why: oneSentence(why.text), public: parsePublic(r.public, drop), conflicts: parseStatementConflicts(r.conflicts, known), claims: listed, blocked_by: outVerdict === "hold" ? parseBlockedBy(r.blocked_by, ref) : [] };
 }
 
 /** The reply's reason before the word cut that the stored review applies. */
@@ -422,10 +423,10 @@ export function lintOpusReply(text: string, ref: string, unapplied: readonly Una
 /**
  * The texts of a reply that can reach GitHub, for the reference and owner-statement checks, with the field each is in (the
  * index is the position in the reply's array): public text and claims are posted with the review, a fix's change is
- * posted in the comment that lists the fixes when they cannot be pushed, and a title and blocking reason in the review post and the follow-up issue.
+ * posted in the comment that lists the fixes when they cannot be pushed, and a title, blocking reason and outside-purpose note in the review post and the follow-up issue.
  */
 export function publicTexts(text: string): { field: string; text: string }[] {
-  const r = replyObject(text) as { public?: { summary?: unknown; points?: unknown }; claims?: unknown; fixes?: unknown } | null;
+  const r = replyObject(text) as { public?: { summary?: unknown; points?: unknown }; claims?: unknown; fixes?: unknown; outside_purpose?: { note?: unknown } | null } | null;
   const pc = parseClaims(r?.claims, new Set(), true);
   const claimTexts = (pc?.claims ?? []).flatMap((c, k) => { const i = pc!.indexes[k]!; return [{ field: `claims[${i}].claim`, text: c.claim }, ...(c.evidence ? [{ field: `claims[${i}].evidence`, text: c.evidence }] : [])]; });
   const claimFixes = (Array.isArray(r?.claims) ? r.claims : []).flatMap((c: { fix?: { change?: unknown } } | null, i) => (typeof c?.fix?.change === "string" && c.fix.change.trim() ? [{ field: `claims[${i}].fix.change`, text: c.fix.change }] : []));
@@ -440,6 +441,9 @@ export function publicTexts(text: string): { field: string; text: string }[] {
   ]);
   const hw = whyOf((r as { blocking?: unknown } | null)?.blocking);
   if (hw) fixes.push({ field: "blocking.why", text: hw });
+  // The note of lines outside the purpose is filed in the follow-up issue.
+  const on = r?.outside_purpose && typeof r.outside_purpose === "object" ? r.outside_purpose.note : undefined;
+  if (typeof on === "string" && on.trim()) fixes.push({ field: "outside_purpose.note", text: on });
   const p = r?.public;
   if (!p || typeof p !== "object") return [...claimTexts, ...claimFixes, ...fixes];
   return [

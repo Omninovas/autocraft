@@ -26,6 +26,7 @@ import { currentAttempt, writeStep } from "../src/implement/attempt.ts";
 import { openQuestion } from "../src/implement/questions.ts";
 import { recordSteps, startAttempt } from "../src/data/implement/index.ts";
 import { applyStuckAnswer, markStuck } from "../src/implement/stuck.ts";
+import { resumeOutsideStops } from "../src/workflow/outside-resume.ts";
 import { actor, approvedReview, asked, ASKS, fixup, implementationOpened, implementIssue, keep, labelOf, later, leg8, legState, MAINT, nextStep, ownPush, review, review8, say } from "./workflow-advance-world.ts";
 
 test("each blocker stops an approved item and keeps its approval", async () => {
@@ -52,6 +53,21 @@ test("each blocker stops an approved item and keeps its approval", async () => {
     assert.notEqual(await legState(w), "review", `${blocker}: the merge leg stops`);
     w.close();
   }
+});
+
+test("an approved workflow an earlier release stopped at changes outside its purpose resumes with its approval; one stopped for another reason waits", async () => {
+  const w = await approvedReview();
+  await w.pr(2, { label: "feature" });
+  assert.equal((await runCommand(w.db, actor, "dashboard", { parsed: parse("review and merge"), items: [{ repo: "app", number: 2 }] })).items[0]!.outcome, "run");
+  const stop = (n: number, blocker: string) => w.db.run(w.db.k.updateTable("main.item_workflows").where("number", "=", n)
+    .set({ state: "blocked", blocker, blocker_params: "{}", rec: JSON.stringify({ text: "Fix 1, then merge.", parts: { fix: [1], drop: [] }, merges: true }), rec_at: later(), rec_head: "sha1" }));
+  await stop(1, "outside-purpose");
+  await stop(2, "major-finding");
+  assert.deepEqual(await resumeOutsideStops(w.db), ["app#1"]);
+  const [one, two] = [(await liveWorkflow(w.db, "app", 1))!, (await liveWorkflow(w.db, "app", 2))!];
+  assert.deepEqual([one.state, one.blocker, one.rec, one.approvedBy], ["running", null, null, MAINT]);
+  assert.deepEqual([two.state, two.blocker], ["blocked", "major-finding"]);
+  w.close();
 });
 
 test("however much our own pushes change, they never stop an approved item", async () => {

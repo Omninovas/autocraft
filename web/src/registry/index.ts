@@ -11,22 +11,14 @@ import { helpModule } from "../modules/help";
 import { runnerModule } from "../modules/runner";
 import { referenceModule } from "../modules/reference";
 import { adminHubModule } from "../modules/admin/hub";
-import { accessModule, auditModule, contributorsModule } from "../modules/admin";
+import { auditModule, contributorsModule } from "../modules/admin";
 import { nextModule } from "../modules/next";
 import { agentsModule } from "../modules/agents";
 import { workspacesModule } from "../modules/workspaces";
-import { ratesModule } from "../modules/rates";
-import { progressModule } from "../modules/progress";
 import { activityModule } from "../modules/activity";
-import { classifiersModule } from "../modules/classifiers";
-import { costModule } from "../modules/cost";
-import { downloadsModule } from "../modules/downloads";
 import { connectModule } from "../modules/connect";
 import { pipelineModule } from "../modules/pipeline";
-import { inferenceModule } from "../modules/inference";
 import { mainCiModule } from "../modules/mainci";
-import { nightlyModule } from "../modules/nightly";
-import { stuckModule } from "../modules/stuck";
 import { batchModule } from "../modules/batch";
 import { securityModule } from "../modules/security";
 import { similarModule } from "../modules/similar";
@@ -44,21 +36,12 @@ export const modules: FeatureModule[] = [
   nextModule,
   agentsModule,
   workspacesModule,
-  ratesModule,
-  progressModule,
   activityModule,
   contributorsModule,
-  classifiersModule,
-  costModule,
-  downloadsModule,
-  accessModule,
   auditModule,
   connectModule,
   pipelineModule,
-  inferenceModule,
   mainCiModule,
-  nightlyModule,
-  stuckModule,
   batchModule,
   securityModule,
   similarModule,

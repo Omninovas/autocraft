@@ -157,7 +157,7 @@ const ROUTES: [string, Record<string, string>, string?][] = [
   ["/api/items/:repo/:n/page", { repo: "repo1", n: "1" }], ["/api/items/:repo/:n/page", { repo: "repo1", n: "1" }, "since=<stamp>"], ["/api/items/:repo/:n", { repo: "repo1", n: "1" }], ["/api/items/:repo/:n/peek", { repo: "repo1", n: "1" }],
   ["/api/items/:repo/:n/trace", { repo: "repo1", n: "1" }], ["/api/items/:repo/:n/chat", { repo: "repo1", n: "1" }], ["/api/similar/:repo/:n", { repo: "repo1", n: "1" }],
   ["/api/queue/page", {}], ["/api/next", {}], ["/api/model-queue", {}], ["/api/runners", {}], ["/api/activity", {}], ["/api/activity", {}, "since=<stamp>"], ["/api/agents", {}], ["/api/agents/:id", { id: "20" }],
-  ["/api/search", {}, "q=item"], ["/api/repos/all", {}], ["/api/envs", {}], ["/api/envs/caches", {}], ["/api/tasks", {}], ["/api/workspaces", {}], ["/api/stuck", {}], ["/api/main-ci", {}], ["/api/main-ci/summary", {}],
+  ["/api/search", {}, "q=item"], ["/api/repos/all", {}], ["/api/envs", {}], ["/api/envs/caches", {}], ["/api/tasks", {}], ["/api/workspaces", {}], ["/api/main-ci", {}], ["/api/main-ci/summary", {}],
   ["/api/pipeline", {}], ["/api/pipeline/jobs", {}], ["/api/pipeline/jobs/:id", { id: "20" }], ["/api/pipeline/state", {}], ["/api/rates", {}], ["/api/prompts", {}], ["/api/audit", {}], ["/api/cost", {}], ["/api/classifiers", {}], ["/api/contributors", {}],
   ["/api/nightly", {}], ["/api/downloads", {}], ["/api/build/summary", {}], ["/api/build/features", {}], ["/api/build/screenshots", {}], ["/api/batches/:id", { id: "1" }], ["/api/mcp/tokens", {}],
   ["/api/repos/:repo/security", { repo: "repo1" }], ["/api/security/scans", {}], ["/api/security/findings", {}], ["/api/areas/:repo", { repo: "repo1" }],

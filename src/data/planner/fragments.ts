@@ -87,10 +87,10 @@ export function plannedItem(eb: Eb, alias: string): Expression<SqlBool> {
 export function latestStage(db: Db, repo?: string) {
   return queryDb(db).k.selectFrom("item_stage").selectAll().$if(!!repo, (q) => q.where("repo", "=", repo!));
 }
-/** The item has a `liveness_items` row with verdict `stuck`. */
-export function stuckItem(eb: Eb, alias: string): Expression<SqlBool> {
+/** The item has a `liveness_items` row with this verdict: `stuck` (nothing is due and nobody is asked) or `long` (live, but its plan has not changed for days). */
+export function stuckItem(eb: Eb, alias: string, verdict: "stuck" | "long" = "stuck"): Expression<SqlBool> {
   const w = schemaEb(eb);
-  return w.exists(w.selectFrom("liveness_items as li").select(w.lit(1).as("one")).where("li.repo", "=", eb.ref(`${alias}.repo`)).where("li.number", "=", eb.ref(`${alias}.number`)).where("li.verdict", "=", "stuck"));
+  return w.exists(w.selectFrom("liveness_items as li").select(w.lit(1).as("one")).where("li.repo", "=", eb.ref(`${alias}.repo`)).where("li.number", "=", eb.ref(`${alias}.number`)).where("li.verdict", "=", verdict));
 }
 /** A `stages` row of that stage exists for the item. */
 export function hasStage(eb: Eb, alias: string, stage: string): Expression<SqlBool> {

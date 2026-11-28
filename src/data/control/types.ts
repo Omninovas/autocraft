@@ -22,7 +22,7 @@ export type Details = Record<string, unknown>;
 export type AuditWhere = { state?: string; source?: string; card?: number; held?: number; commit?: string };
 export type AuditFilter = { targets?: string[]; actions?: string[]; since?: string; until?: string; where?: AuditWhere; order?: "asc" | "desc"; limit?: number };
 /** `visible` or `actions` set: a viewer who is not an operator (only `actions` listed; security rows of the `visible` repos). */
-export type AuditPageFilter = { login?: string; action?: string; q?: string; before?: number; limit: number; offset: number; visible?: string[]; actions?: string[] };
+export type AuditPageFilter = { login?: string; action?: string; q?: string; before?: number; limit: number; offset: number; visible?: string[]; hidden?: string[]; actions?: string[] };
 export type WriteLogRow = { rowid: number; at: string; action: string; target: string | null; state: string | null; identity: string | null; commit: string | null; url: string | null; review: string | null; head: string | null; labels: string[]; jobId: number | null; error: string | null };
 export type WritePace = { identity: string; owner: string; bulk: boolean };
 export type PaceKey = { action: string; identity: string; owner: string };

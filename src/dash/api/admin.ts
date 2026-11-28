@@ -40,8 +40,9 @@ import { setting } from "../../data/control/index.ts";
 const NOTE_MAX = 300;
 const ACCESS_NOTE_MAX = 500;
 const AUDIT_PAGE = 50;
-// Accounts and access (who can sign in, sessions) are audited for operators only.
-export const operatorOnly = (a: string) => a.startsWith("access-") || a.startsWith("github-app-") || a.startsWith("github-mention-") || a.startsWith("app-") || a.startsWith("account-") || a.startsWith("mcp-token-") || a.startsWith("runner-") || ["session-revoke", "sign-in", "sign-in-refused", "usage-reserve", "my-repos", "max-calls", "interactive-slots", "manual-only", "transcript-store"].includes(a);
+// Accounts and access (who can sign in, sessions), the abuse protections and the instance identity are audited for operators only.
+export const operatorOnly = (a: string) => a.startsWith("access-") || a.startsWith("github-app-") || a.startsWith("github-mention-") || a.startsWith("app-") || a.startsWith("account-") || a.startsWith("mcp-token-") || a.startsWith("runner-") || ["session-revoke", "sign-in", "sign-in-refused", "usage-reserve", "my-repos", "max-calls", "interactive-slots", "manual-only", "transcript-store",
+    "abuse-limits", "outside-release", "outside-release-author", "stage-trip", "github-identity", "env-rotate-key"].includes(a);
 export const AUDIT_ACTIONS = [
   "answer", "undo", "dispute", "dispute-resolve", "answer-sweep", "adopt", "opinion", "opinion-retract", "comment", "override", "rule", "access-add", "access-remove", "access-role",
   "session-revoke", "mcp-token-create", "mcp-token-revoke", "app-owner-allow", "app-owner-remove", "app-install-removed", "webhook-redeliver", "app-foreign-install-ack", "runner-migrate", "runner-approve", "runner-deny", "runner-revoke", "runner-scopes", "runner-rename", "usage-reserve", "my-repos", "max-calls", "interactive-slots", "manual-only", "runner-private", "remote-pick", "remote-unpick", "remote-pick-minutes", "sign-in", "sign-in-refused", "account-add", "account-change", "account-login-start", "account-login-code", "account-login-cancel", "account-token-start", "account-token-code", "account-token-cancel", "account-token-set", "account-token-remove", "account-sign-out", "account-refresh", "repo-track", "repo-untrack", "reference-import", "labels-approve", "labels-revoke", "labels-apply", "merge-approve", "merge-revoke", "comment-approve", "comment-revoke", "act-comment", "act-close", "act-reopen", "act-open-issue", "discord-issue-open", "discord-issue-bot", "discord-issue-label", "act-unlabel", "act-transfer", "act-request-reviewers", "act-skip", "push-approve", "push-revoke", "fixup-push", "fixup-comment", "fixup-comment-edit", "fixissue-approve", "fixissue-revoke", "prstatus-approve", "prstatus-revoke", "pr-status-comment", "pr-status-comment-edit", "pr-status-ping", "mainfix-approve", "mainfix-revoke", "optional-check-add", "optional-check-remove", "fixissue-push", "fixissue-pr", "fixissue-comment", "implement-push", "implement-pr", "implement-comment",
@@ -563,8 +564,9 @@ export async function auditLog(db: Db, req: Req): Promise<AuditPage> {
   const limit = int(q.get("limit"), AUDIT_PAGE, 1, 500, "limit");
   const offset = int(q.get("offset"), 0, 0, 1e9, "offset");
   // Security rows name their repo first in the target (`<repo>:scan:<id>`, `<repo>:finding:<n>`); a maintainer sees those of repos they can see.
-  const visible = operator ? [] : await visibleRepos(db, req);
-  const { total, rows } = await listAuditPage(db, { login: login || undefined, action: action || undefined, limit, offset, ...(operator ? {} : { visible, actions }) });
+  // Every other row that names a repo in its target is left out for a maintainer who cannot see the repo.
+  const [visible, hidden] = operator ? [[], []] : await Promise.all([visibleRepos(db, req), hiddenRepos(db, req)]);
+  const { total, rows } = await listAuditPage(db, { login: login || undefined, action: action || undefined, limit, offset, ...(operator ? {} : { visible, hidden: [...hidden], actions }) });
   const entries: AuditEntry[] = rows.map((r) => ({ at: r.at, login: r.login, action: r.action, target: r.target, details: r.details }));
   return { entries, total, actions };
 }

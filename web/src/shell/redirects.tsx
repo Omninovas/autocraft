@@ -5,10 +5,10 @@ import { decisionItem, itemPath } from "../lib/links";
 import { ALL } from "../api/scope";
 import { useUser } from "./UserContext";
 
-/** `search` replaces the query; without it the old query stays. */
-function RedirectTo({ to, search }: { to: string; search?: string }) {
+/** `search` replaces the query; without it the old query stays. `hash` names the part of the page to open. */
+function RedirectTo({ to, search, hash = "" }: { to: string; search?: string; hash?: string }) {
   const loc = useLocation();
-  return <Navigate to={`${to}${search ?? loc.search}`} replace />;
+  return <Navigate to={`${to}${search ?? loc.search}${hash}`} replace />;
 }
 
 /** Old item links: `/item/<repo>/<n>` and the `<repo>/<n>` form of a decision link. */
@@ -67,6 +67,12 @@ const REDIRECTS: [path: string, element: ReactElement][] = [
   ["flow", <RedirectTo to="/help/workflows" search="" />],
   ["about/*", <RedirectTo to="/help" search="" />],
   ["reports", <RedirectTo to="/stats" search="" />],
+  ["stuck", <RedirectTo to="/items" search="?q=is:stuck" />],
+  // The pages that became folds of Stats open their fold, with their query.
+  ...["progress", "cost", "classifiers", "rates", "downloads", "nightly"].map((p): [string, ReactElement] => [p, <RedirectTo to="/stats" hash={`#${p}`} />]),
+  ["inference", <RedirectTo to="/admin/inference" search="" />],
+  ["access", <RedirectTo to="/admin/users" search="" />],
+  ["admin/audit", <RedirectTo to="/audit" />],
   ["settings", <SettingsRedirect operator="/admin" />],
   ["accounts", <SettingsRedirect operator="/admin/inference" />],
 ];

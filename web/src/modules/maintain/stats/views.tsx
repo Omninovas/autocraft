@@ -1,6 +1,7 @@
 // Stats: what the pipeline got done, how main and the nightly checks stand, what it cost; the rest in folds.
 // Maintainers and viewers see it as well as operators. Hosted views drop their own frame and heading (Embedded).
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { TextLink } from "../../../ui/atoms/TextLink";
 import { Headline } from "./Headline";
 import { t } from "../../../../../src/i18n/index.ts";
@@ -16,10 +17,16 @@ import { RatesView } from "../../rates/views";
 import { Downloads } from "../../downloads/views";
 import type { ViewProps } from "../../../registry/types";
 
-function Details({ title, children }: { title: string; children: ReactNode }) {
+/** A fold of Stats; `/stats#<id>` opens it and scrolls to it. */
+function Details({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+  const named = useLocation().hash === `#${id}`;
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (named) box.current?.scrollIntoView({ block: "start" });
+  }, [named]);
   return (
-    <div className="rounded-lg border border-line bg-panel px-3 py-1">
-      <Fold title={<span className="text-md font-semibold text-ink">{title}</span>}>
+    <div ref={box} id={id} className="scroll-mt-4 rounded-lg border border-line bg-panel px-3 py-1">
+      <Fold key={String(named)} open={named} title={<span className="text-md font-semibold text-ink">{title}</span>}>
         <div className="pb-3">{children}</div>
       </Fold>
     </div>
@@ -33,29 +40,29 @@ export function StatsView(props: ViewProps) {
         <Headline />
         <Embedded>
           <div className="flex flex-col gap-2">
-            <Details title={t("Merged and closed")}>
+            <Details id="progress" title={t("Merged and closed")}>
               <Overview {...props} />
             </Details>
-            <Details title={t("Main CI")}>
+            <Details id="main-ci" title={t("Main CI")}>
               <MainCiView {...props} />
             </Details>
-            <Details title={t("Nightly")}>
+            <Details id="nightly" title={t("Nightly")}>
               <NightlyView />
             </Details>
-            <Details title={t("Cost")}>
+            <Details id="cost" title={t("Cost")}>
               <Cost {...props} />
             </Details>
-            <Details title={t("Model calls")}>
+            <Details id="rates" title={t("Model calls")}>
               <div className="flex flex-col gap-6">
                 <ActivityView />
                 <RatesView />
                 <TextLink to="/agents?state=finished" className="text-sm">{t("Model calls that ran, on the Agents page")}</TextLink>
               </div>
             </Details>
-            <Details title={t("Classifiers")}>
+            <Details id="classifiers" title={t("Classifiers")}>
               <Classifiers {...props} />
             </Details>
-            <Details title={t("Downloads")}>
+            <Details id="downloads" title={t("Downloads")}>
               <Downloads {...props} />
             </Details>
           </div>

@@ -16,7 +16,7 @@ const HEALTH: Health = {
     { id: "sync-repo:stencilcraft", area: "sync", tone: "warn", text: "storytold/stencilcraft no longer resolves on GitHub (moved, renamed or deleted)", to: "/repos", since: at(3 * 3600) },
     { id: "main-ci:designcraft", area: "main-ci", tone: "bad", text: "Main is red in designcraft: Tests, Clippy", to: "/main-ci", since: at(95) },
     { id: "jobs", area: "jobs", tone: "warn", text: "2 jobs failed in the last hour: Review pull requests", to: "/pipeline", since: null },
-    { id: "liveness", area: "liveness", tone: "bad", text: "4 open items are stuck: nothing is due and nobody is asked; 2 more unchanged for days", to: "/stuck", since: at(30 * 3600) },
+    { id: "liveness", area: "liveness", tone: "bad", text: "4 open items are stuck: nothing is due and nobody is asked; 2 more unchanged for days", to: "/items?q=is:stuck", since: at(30 * 3600) },
     { id: "deadline:fixup", area: "deadline", tone: "warn", text: "Fix up pull requests was stopped (job 641: stopped: ran past 120 min)", to: "/pipeline/641", since: at(40), ackStep: "fixup" },
   ],
 };

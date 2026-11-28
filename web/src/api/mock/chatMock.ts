@@ -145,7 +145,27 @@ const ISSUE_77: Story = {
   ],
 };
 
-const STORIES: Record<string, Story> = { "photocraft#812": PR_812, "designcraft#455": PR_455, "deckcraft#77": ISSUE_77 };
+// ---- photocraft#8455: approved and merged; the post-merge review found a defect, which paused photocraft's merges ----
+const PR_8455: Story = {
+  title: "Merge queue",
+  status: "Merged into main, approved by ochre-fox",
+  state: "done",
+  next: null,
+  working: null,
+  beats: [
+    { b: "gh", min: 30 * 60, actor: "kiri-n", summary: "Opened the pull request" },
+    { b: "said", min: 26 * 60, login: "ochre-fox", via: "github", body: "@autocraft merge" },
+    { b: "reply", min: 26 * 60, body: "Queued photocraft#8455 to merge when CI is green (approved by ochre-fox). Reply **hold** to stop." },
+    { b: "work", min: 25 * 60, kind: "write", title: "Updated the branch from main", outcome: "merge commit 5b2e7f0", detail: [["As", "AutoCraft Bot"]] },
+    { b: "gh", min: 25 * 60 - 12, actor: "github-actions", summary: "CI passed on 5b2e7f0 (5 checks)" },
+    { b: "work", min: 25 * 60 - 14, kind: "write", title: "Merged into main", outcome: "squash merge, 5b2e7f0", detail: [["As", "ochre-fox (approved the merge)"]] },
+    { b: "work", min: 25 * 60 - 30, kind: "model-call", run: 7120, title: "Post-merge review of AutoCraft's changes", model: "Opus", seconds: 110, costUsd: 0.15, outcome: "1 defect", tokens: [24_300, 1_100], tools: 4 },
+    { b: "reply", min: 25 * 60 - 31, body: "The post-merge review found a defect in the branch update:",
+      findings: [{ n: 1, title: "The merge from main dropped the histogram cache reset in the document-close path, so a reopened document shows the old histogram.", file: "crates/histogram/src/cache.rs:88", major: true }] },
+  ],
+};
+
+const STORIES: Record<string, Story> = { "photocraft#812": PR_812, "designcraft#455": PR_455, "deckcraft#77": ISSUE_77, "photocraft#8455": PR_8455 };
 
 export const CHAT_ITEMS = new Set(Object.keys(STORIES));
 

@@ -16,7 +16,6 @@ import { OutsideLimits, PipelineSwitch, StageLimits } from "../pipeline/controls
 import { cn } from "../../ui/cn";
 
 const AccessView = lazyView(() => import("./accessViews"), "AccessView");
-const AuditView = lazyView(() => import("./auditViews"), "AuditView");
 const DiscordView = lazyView(() => import("./discordViews"), "DiscordView");
 const GithubAppView = lazyView(() => import("./githubAppViews"), "GithubAppView");
 const InferenceView = lazyView(() => import("../inference/views"), "InferenceView");
@@ -116,7 +115,6 @@ const PAGES: AdminPage[] = [
   { id: "github-app", label: tk("GitHub App"), view: (p) => <GithubAppView {...p} /> },
   { id: "discord", label: tk("Discord"), view: (p) => <DiscordView {...p} /> },
   { id: "limits", label: tk("Limits"), view: (p) => <LimitsView {...p} /> },
-  { id: "audit", label: tk("Audit log"), view: (p) => <AuditView {...p} /> },
 ];
 
 function AdminIndex(_: ViewProps) {

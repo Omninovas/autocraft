@@ -5,6 +5,7 @@ import type { Api } from "../client";
 import type { ItemPhase, MaintainCommandResult, MaintainHome, MaintainItemGroup, MaintainItemRow, MaintainItems, MaintainItemsQuery, MaintainRepo, MaintainRow, MaintainStats, User } from "../types";
 import { requestProject } from "../scope";
 import { NOW } from "./fixtures";
+import { itemsListPath, itemsPath } from "../../lib/links";
 
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
 const row = (r: Partial<MaintainRow> & Pick<MaintainRow, "repo" | "number" | "title" | "line">): MaintainRow => ({
@@ -168,7 +169,17 @@ export function createMaintainMock(me: User): Pick<Api, "maintain"> {
         const repo = requestProject();
         const rows = ROWS.filter((r) => !repo || r.repo === repo);
         const own = ownRows(me.login, repo);
-        const attention: MaintainHome["attention"] = (!repo || repo === "photocraft") ? [{ kind: "stopped", title: "Fix-up stopped by the breaker in photocraft", detail: me.role === "viewer" ? "" : "3 pushes in a row broke CI on photocraft; resume after a look.", to: "/queue" }] : [];
+        const staff = me.role !== "viewer", operator = me.role === "operator";
+        const all: (MaintainHome["attention"][number] & { repo?: string })[] = [
+          { kind: "stopped", repo: "photocraft", title: "Merge queued pull requests in photocraft", detail: staff ? "the post-merge review of photocraft#8455 found 1 defect" : "", to: itemsListPath([{ repo: "photocraft", number: 8455 }]),
+            ...(me.runRepos.includes("photocraft") && { action: { kind: "resume-breaker", key: "merge:photocraft" } as const }) },
+          { kind: "stopped", title: "first-timer-9", detail: staff ? "2 PRs, 1 issue waiting for the author's daily limit" : "", to: itemsPath("is:outside-held author:first-timer-9"),
+            ...(operator && { action: { kind: "release-author", author: "first-timer-9" } as const }) },
+          { kind: "health", title: "5 open items have not changed for days", detail: "", to: itemsPath("is:stale") },
+          { kind: "stuck", title: "Review was stopped (job 91234: ran past its 40 minute limit)", detail: "", to: "/pipeline/91234", ...(operator && { action: { kind: "ack-deadline", step: "review" } as const }) },
+          ...(staff ? [{ kind: "gave-up" as const, repo: "designcraft", title: "designcraft#1855: CI fix gave up", detail: "Bump the PDF writer to the new font subsetter", to: itemsListPath([{ repo: "designcraft", number: 1855 }]) }] : []),
+        ];
+        const attention: MaintainHome["attention"] = all.filter((p) => !repo || !p.repo || p.repo === repo).map(({ repo: _r, ...p }) => p);
         const home: MaintainHome =
           me.role === "viewer"
             ? { mine: [], mineTotal: 0, recent: [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 8), runner: null, attention }

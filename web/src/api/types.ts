@@ -460,29 +460,6 @@ export interface MainCiRepo {
   /** What AutoCraft is doing about the red head ("rerunning failed jobs", "asked an operator", "needs a fix", ...); null when nothing. */
   autocraft: string | null;
 }
-/** One open item the liveness check flags: `stuck` (nothing is due and nobody is asked) or `long` (live, but unchanged past the limit). */
-export interface StuckItem {
-  repo: RepoName;
-  number: number;
-  kind: "pr" | "issue";
-  verdict: "stuck" | "long";
-  /** Why it is stuck, or for a long item why it is live. */
-  cause: string;
-  state: string;
-  wait: string | null;
-  phase: string;
-  /** When the plan state or wait last changed. */
-  since: string;
-  title: string | null;
-}
-/** GET /api/stuck. */
-export interface StuckItems {
-  checkedAt: string | null;
-  open: number;
-  stuck: number;
-  long: number;
-  items: StuckItem[];
-}
 /** GET /api/main-ci: red first, then optional, running, none, green; each group by name. */
 export interface MainCi {
   summary: MainCiSummary;
@@ -2295,7 +2272,14 @@ export type OutsideState = { prsPerDay: number; issuesPerDay: number; surgePerHo
 export type HeldAuthor = { author: string; prs: number; issues: number; /** When the oldest of them was opened. */ oldest: string | null; surge: boolean };
 
 export type ProblemKind = "stopped" | "health" | "stuck" | "gave-up";
-export interface HomeProblem { kind: ProblemKind; title: string; detail: string; to: string }
+/** What a Needs attention row lets the reader do there; the server sends it only to readers allowed to run it. */
+export type HomeAction =
+  | { kind: "resume-breaker"; key: string }
+  | { kind: "release-author"; author: string }
+  | { kind: "ack-deadline"; step: string }
+  | { kind: "ack-foreign-install" };
+/** A Needs attention row; `to` opens what it names: the item beside the Items list, an Items filter, or the page that holds it. */
+export interface HomeProblem { kind: ProblemKind; title: string; detail: string; to: string; action?: HomeAction }
 
 export type ReviewTrigger = "new-head" | "discussion" | "operator" | "base" | "model-change";
 export type ReviewVerdict = "take" | "take-fix" | "hold" | "close";
@@ -2932,6 +2916,8 @@ export interface BrowseRow {
   duplicate: boolean;
   createdAt: string;
   updatedAt: string;
+  /** Staff, on a list filtered by `is:stuck` or `is:stale`: why the liveness check flags the item, what its plan waits for and since when. */
+  liveness?: { cause: string; wait: string | null; since: string };
 }
 
 export interface BrowseQuery {

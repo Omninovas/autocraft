@@ -46,6 +46,7 @@ import { CLAUDE_PROMPTS } from "../prompts/index.ts";
 import { cachedDiff, ghDiff, type DiffFetcher } from "../review/diff.ts";
 import { REPO_PATH } from "../sandbox/command.ts";
 import { checkoutForPr } from "../sandbox/index.ts";
+import { checkoutDiff } from "../fixup/diff-view.ts";
 import { MAX_PUSHES_PER_PR, MAX_TRIES_PER_PR, type CifixCandidate } from "./candidates.ts";
 import { selectCifix } from "./select.ts";
 import { formattingOnly, guardPatch, TEST_PATH } from "./guard.ts";
@@ -303,10 +304,14 @@ export async function patchFromFailure(db: Db, d: Pick<CifixDeps, "ask" | "check
   const text = failure.checks.flatMap((x) => x.steps.map((s) => s.tail)).join("\n");
   const scripts = await buildScriptsAt(git, head);
   // Files a compiler error points at come first, then the files the diff changes; nothing else is editable. Test files are not editable by a CI fix.
-  const named = [...new Set(errorFiles(text).concat([...r.diffText.matchAll(DIFF_FILE)].map((m) => m[1]!)))]
+  const cited = errorFiles(text);
+  const named = [...new Set(cited.concat([...r.diffText.matchAll(DIFF_FILE)].map((m) => m[1]!)))]
     .filter((p) => editable(p, scripts) && !TEST_PATH.test(p)).slice(0, MAX_FILES);
   // With a sandbox checkout the model reads the files itself, so they are listed by path and no size limit applies.
   const checkout = (await r.checkout()) ?? undefined;
+  if (!checkout && r.diffText.length > DIFF_CAP) return no("failed", `the PR diff is over the ${DIFF_CAP} character limit and no checkout could be made`);
+  // The model and the patch check read the same diff: with a checkout, one over the cap keeps the sections of the files the log names.
+  const diffText = checkout ? checkoutDiff(r.diffText, new Set(cited), Math.min(DIFF_CAP, CHECK_DIFF_CAP)) : r.diffText;
   const repoDir = checkout ? { repo_dir: REPO_PATH } : {};
   const shown: CifixPr["files"] = [];
   let total = 0;
@@ -324,7 +329,7 @@ export async function patchFromFailure(db: Db, d: Pick<CifixDeps, "ask" | "check
   if (!shown.length) return no("failed", "the failure names no file a CI fix may edit");
   const quiet = !!r.quiet || (await loadQuiet(db, [`${repo}#${r.number}`])).size > 0;
   const tool = new CheckTool({ db, step: "cifix", repo, number: r.number || null, head, base: r.base, applies: applyCheck(git, d.root, head, (p) => refusal(validatePatch(p, shown.map((s) => s.path), (x) => editable(x, scripts)))) });
-  const reply = await d.ask(db, [{ ref, title, failure: logText(failure), ...(quiet ? { quiet } : {}), files: shown, diff: r.diffText, ...(r.previous ? { previous: r.previous } : {}), ...repoDir }], checkout, tool, r.session);
+  const reply = await d.ask(db, [{ ref, title, failure: logText(failure), ...(quiet ? { quiet } : {}), files: shown, diff: diffText, ...(r.previous ? { previous: r.previous } : {}), ...repoDir }], checkout, tool, r.session);
   if (reply === null) return no("failed", "the model gave no answer");
   const v = validatePatch(reply, shown.map((s) => s.path), (x) => editable(x, scripts));
   if (!v.ok) return no("refused", v.reason);
@@ -336,7 +341,7 @@ export async function patchFromFailure(db: Db, d: Pick<CifixDeps, "ask" | "check
   const names = failure.checks.map((x) => x.name);
   const check = async (patch: string): Promise<string | null> => {
     const input: FixupCheckInput = {
-      ref, title, fixes: [], diff: r.diffText.slice(0, CHECK_DIFF_CAP), patch, ...repoDir,
+      ref, title, fixes: [], diff: diffText.slice(0, CHECK_DIFF_CAP), patch, ...repoDir,
       review_reason: r.reviewReason ?? `The check ${names.join(", ")} fails at this head. The patch must make it pass without changing what the pull request does.`,
       ci_failure: { checks: names, log: JSON.stringify(logText(failure)).slice(0, CHECK_LOG_CAP) },
     };
@@ -577,7 +582,8 @@ async function runCifixWith(db: Db, params: CifixParams, log: (line: string) => 
     if (head !== c.head) { await noteLive(db, repo, c.number, { ...pr, headRefOid: head }, at()); await fail("failed", `fetched head ${short(head)} is not the checked ${short(c.head)}`); return; }
     const diff = await cachedDiff(db, repo, c.number, head, d.fetchDiff);
     if (!diff.ok) { await fail("failed", `no diff: ${oneLine(diff.error)}`); return; }
-    if (diff.text.length > DIFF_CAP) { await fail("failed", `the PR diff is over the ${DIFF_CAP} character limit`); return; }
+    // With a checkout the model reads a trimmed diff (patchFromFailure); without one, a diff over the cap gets no patch.
+    if (!d.checkout && diff.text.length > DIFF_CAP) { await fail("failed", `the PR diff is over the ${DIFF_CAP} character limit`); return; }
     const made = await patchFromFailure(db, d, { git, ref, title: titleOf(c),
       repo, number: c.number, head, base: pr.baseRefOid ?? null, round: c.attempt, failure, diffText: diff.text, ...(previous ? { previous } : {}), session: ses, runId, actor: ACTOR, at, checkout: async () => d.checkout?.(repo, c.number, head) });
     ledger.hold(ses.kept);

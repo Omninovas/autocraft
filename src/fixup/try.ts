@@ -55,8 +55,8 @@ export async function runFixupTry(db: Db, repo: string, number: number, d: Fixup
   const diff = await cachedDiff(db, repo, number, head, d.fetchDiff);
   if (!diff.ok) throw new Error(`no diff: ${diff.error}`);
   const checkout = (await d.checkout?.(repo, number, head)) ?? undefined;
-  if (!checkout && diff.text.length > DIFF_CAP) throw new Error(`the PR diff is over the ${DIFF_CAP} character limit`);
-  const modelDiff = checkout ? checkoutDiff(diff.text, new Set(files), DIFF_CAP) : diff.text;
+  if (!checkout && diff.text.length > DIFF_CAP) throw new Error(`the PR diff is over the ${DIFF_CAP} character limit${d.checkout ? " and no checkout could be made; try again later" : ""}`);
+  const modelDiff = checkout ? checkoutDiff(diff.text, new Set(files), Math.min(DIFF_CAP, CHECK_DIFF_CAP)) : diff.text;
   const repoDir = checkout ? { repo_dir: REPO_PATH } : {};
   const shown: FixupPr["files"] = [];
   let total = 0;

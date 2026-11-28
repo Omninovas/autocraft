@@ -405,8 +405,14 @@ async function runFixupWith(db: Db, params: FixupParams, log: (line: string) => 
       // With a sandbox checkout the model reads the files itself, so they are listed by path and no size limit applies,
       // and a diff over the cap is shown as the named files' sections plus the other files by path.
       const checkout = (await d.checkout?.(repo, c.number, head)) ?? undefined;
-      if (!checkout && diff.text.length > DIFF_CAP) { await hold("too-large", `the PR diff is over the ${DIFF_CAP} character limit`); return; }
-      const modelDiff = checkout ? checkoutDiff(diff.text, new Set(c.fixes.map((f) => f.file)), DIFF_CAP) : diff.text;
+      if (!checkout && diff.text.length > DIFF_CAP) {
+        // A checkout that could not be made this time holds nothing: the next run tries again.
+        if (d.checkout) { log(`  ${ref}: skipped: the PR diff is over the ${DIFF_CAP} character limit and there is no checkout; tried again later`); return; }
+        await hold("too-large", `the PR diff is over the ${DIFF_CAP} character limit`);
+        return;
+      }
+      // The model and the patch check read the same diff, within both their limits.
+      const modelDiff = checkout ? checkoutDiff(diff.text, new Set(c.fixes.map((f) => f.file)), Math.min(DIFF_CAP, CHECK_DIFF_CAP)) : diff.text;
       const repoDir = checkout ? { repo_dir: REPO_PATH } : {};
       const quiet = (await loadQuiet(db, [`${repo}#${c.number}`])).size > 0;
       const shown: FixupPr["files"] = [];

@@ -126,9 +126,11 @@ function safety({ w, f, p }: Case): Violation[] {
     const on = view(all(true)), off = view(all(false));
     need("person-approval", on === off, `with the repo's approvals ${on}\n  without them ${off}`);
   }
-  // The leg of an approved PR waits while the defects' fix-up can be made: the plan makes it, or says what comes first.
+  // The leg of an approved PR waits while the defects' fix-up can be made: the plan makes it, or says what comes first. The defects
+  // were found at the review's head; a head that moved past it is read first (a review, or the carry of our checked pushes).
   if (f.operator?.premerge && premergeFix(f) === "fix" && f.ci === "success" && f.mergeable === "MERGEABLE" && !f.pushedOff) {
-    need("premerge-fix", p.wait !== null || has(p, "fixup").length || has(p, "verify").length || f.operator.fix || f.draft || !f.review || f.review.stale, "a pre-merge fix-up that can be made is not planned");
+    const readsHead = !!f.review && f.review.head !== f.head && (has(p, "review").length > 0 || has(p, "carry").length > 0);
+    need("premerge-fix", p.wait !== null || has(p, "fixup").length || has(p, "verify").length || readsHead || f.operator.fix || f.draft || !f.review || f.review.stale, "a pre-merge fix-up that can be made is not planned");
   }
   // A refused merge of a started PR is never all there is: something says what it waits for.
   if (w.workflow) for (const a of merges) if (runs(a) === false && f.pipelineOn && !f.tripped?.merge && !named(f, a)) {

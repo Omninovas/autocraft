@@ -6,6 +6,9 @@
 // where they may write in the chat (`by`): items in the mirror, in repos they see, as an operator or a maintainer with write access
 // (the chat's rule, dash/api/conversations.ts canTalk). A command that ran nothing and wrote no event keeps its reply on its message
 // (`payload.refusal`), so the chat shows the answer after a reload.
+//
+// A command for a list of items is each item's own command: the message on an item the list names holds the command words without
+// the list, so no item's chat carries the other items. A GitHub comment is stored as written, as it stands on GitHub.
 import * as access from "../data/access/index.ts";
 import { linkMessage, loadCommentMessage, recordMessages, setMessageRefusal } from "../data/chat/index.ts";
 import type { ChatVia } from "../data/chat/index.ts";
@@ -15,6 +18,7 @@ import { loadLastEventId, loadNewestEventBy } from "../data/workflow/index.ts";
 import type { Db } from "../db/index.ts";
 import { ownerOf } from "../owners.ts";
 import type { CommandResult } from "./apply.ts";
+import { listForm } from "./parse.ts";
 import type { ItemRef } from "./types.ts";
 
 /** A stored message and the item it is on. */
@@ -58,6 +62,13 @@ async function storable(db: Db, o: SaidInput): Promise<ItemRef[]> {
   return out;
 }
 
+/** The text as a message on `item`: in the list form, when the list names the item, only the command words before the colon. */
+function ownBody(text: string, item: ItemRef): string {
+  const list = listForm(text, item.repo);
+  if (!list?.words) return text;
+  return list.items.some((i) => i.number === item.number && i.repo.split("/").pop()!.toLowerCase() === item.repo.toLowerCase()) ? list.words : text;
+}
+
 /** Stores the text as one message on each item it may be stored on (`storable`). Failures are logged, not thrown. */
 export async function recordSaid(db: Db, o: SaidInput): Promise<Said[]> {
   const body = o.text.trim();
@@ -66,7 +77,7 @@ export async function recordSaid(db: Db, o: SaidInput): Promise<Said[]> {
     const refs = await storable(db, o);
     if (!refs.length) return [];
     const rows = await recordMessages(db, refs.map((r) => ({
-      repo: r.repo, number: r.number, author: o.login, via: o.via, kind: "said" as const, body,
+      repo: r.repo, number: r.number, author: o.login, via: o.via, kind: "said" as const, body: o.githubCommentId === undefined ? ownBody(body, r) : body,
       ...(o.payload !== undefined ? { payload: o.payload } : {}), ...(o.githubCommentId !== undefined ? { githubCommentId: o.githubCommentId } : {}),
     })));
     // Rows come back in input order, so row i is on item i.

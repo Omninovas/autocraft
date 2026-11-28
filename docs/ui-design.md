@@ -105,7 +105,7 @@ Rules:
 
 ### Items
 
-- The Items page is one paged list with a search box that takes qualifiers, a row of views and quick filters, and a command box that takes a command and a list of items (dashboard-spec.md, Items).
+- The Items page is one paged list with a search box that takes qualifiers, a row of views and quick filters, and a command box at the top that runs a command on the ticked rows, each on its own (dashboard-spec.md, Items).
 
 ### Item page
 

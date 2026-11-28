@@ -173,9 +173,11 @@ export interface Api {
     items(query: MaintainItemsQuery): Promise<MaintainItems>;
     /** The Items browser: one page of the items matching a search with qualifiers; the page's project narrows it. */
     browse(query: BrowseQuery): Promise<BrowseResult>;
-    /** Sends a command written in the dashboard's box; the list form (`merge:` then items) names the items. */
-    /** `asked`: the `asked` of the rows shown, by repo#number. */
-    command(text: string, asked?: Record<string, string>): Promise<MaintainCommandResult>;
+    /**
+     * Sends a command written in the dashboard's box for `items` (repo#number), or for the items its list form (`merge:` then items)
+     * names. `asked`: the `asked` of the rows shown, by repo#number.
+     */
+    command(text: string, opts?: { items?: string[]; asked?: Record<string, string> }): Promise<MaintainCommandResult>;
     /** Repos: every tracked repo the reader may see with its counts, Automatic state and paused steps. */
     repos(): Promise<MaintainRepo[]>;
     /** Per visible repo, the started items that wait for an answer; repos with none are left out. */

@@ -1,10 +1,10 @@
 // Items: a browser over every item of the visible repos. One search box takes words and qualifiers (src/core/item-query.ts),
 // kept in the URL as `q`; the views row sets the whole query, the quick filters change one qualifier each. The server filters,
-// sorts and pages. People who may send commands tick items to fill the command box with the list form (`merge:` then one item
-// per line) and run it for all of them at once.
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+// sorts and pages. People who may send commands tick items, which opens the command box; the ticks are the command's items, kept
+// across pages and searches, and the box holds only the command's words. The command runs for each item on its own.
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type Ref } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ChatCircleIcon, CheckCircleIcon, CircleDashedIcon, DiscordLogoIcon, FunnelIcon, GitPullRequestIcon, RadioButtonIcon, TerminalIcon, XCircleIcon } from "@phosphor-icons/react";
+import { ChatCircleIcon, CheckCircleIcon, CircleDashedIcon, DiscordLogoIcon, FunnelIcon, GitPullRequestIcon, RadioButtonIcon, TerminalIcon, XCircleIcon, XIcon } from "@phosphor-icons/react";
 import { t } from "../../../../../src/i18n/index.ts";
 import { AUTOCRAFT_STATES, DEFAULT_QUERY, KINDS, PRESETS, PRIORITIES, parseItemQuery, presetOf, splitWords, termValues, withTerm, type QueryKey } from "../../../../../src/core/item-query.ts";
 import { useApi, useQuery } from "../../../api/client";
@@ -32,13 +32,6 @@ const PAGE = 50;
 /** Labels a phone row shows before "+n". */
 const PHONE_LABELS = 2;
 const refOf = (r: { repo: string; number: number }) => `${r.repo}#${r.number}`;
-
-/** The command box text with `refs` as its item list: the words before the colon stay, the list after it is replaced. */
-export function withItems(text: string, refs: string[]): string {
-  const colon = text.indexOf(":");
-  const head = (colon >= 0 ? text.slice(0, colon) : text).trimEnd();
-  return refs.length ? `${head}:\n${refs.join("\n")}` : head;
-}
 
 /** Links from before the search box (`filter=`, `show=`, `discord=1`, `area=`) as a query; null when the URL has none of them. */
 function legacyQuery(p: URLSearchParams): string | null {
@@ -130,15 +123,39 @@ function Meta({ r }: { r: BrowseRow }) {
   );
 }
 
+/** A row's tick box: 44 px on phones, 32 px on desktop, above the row's stretched item link. */
+function Tick({ id, label, checked, disabled, onChange, inputRef }: { id?: string; label: string; checked: boolean; disabled?: boolean; onChange: (on: boolean) => void; inputRef?: Ref<HTMLInputElement> }) {
+  return (
+    <label className={cn("relative z-10 -my-2 -ml-2 flex size-11 shrink-0 items-center justify-center md:-my-1 md:size-8", !disabled && "cursor-pointer")}>
+      <input id={id} ref={inputRef} type="checkbox" className="size-4 cursor-pointer accent-accent disabled:cursor-default" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} aria-label={label} />
+    </label>
+  );
+}
+
+/** The list header's tick: every row of this page the reader may run commands on; mixed while only some are ticked. */
+function SelectAll({ refs, picked, onPick }: { refs: string[]; picked: ReadonlySet<string>; onPick: (refs: string[], on: boolean) => void }) {
+  const box = useRef<HTMLInputElement>(null);
+  const id = useId();
+  const on = refs.filter((r) => picked.has(r)).length;
+  const all = refs.length > 0 && on === refs.length;
+  useEffect(() => {
+    if (box.current) box.current.indeterminate = on > 0 && !all;
+  }, [on, all]);
+  return (
+    <div className="flex items-center gap-2 border-b border-line px-3 py-2 text-sm text-ink/80">
+      <Tick id={id} inputRef={box} label={t("Select all shown")} checked={all} disabled={!refs.length} onChange={() => onPick(refs, !all)} />
+      <label htmlFor={id} className={cn(refs.length ? "cursor-pointer" : "opacity-50")}>
+        {t("Select all shown")}
+      </label>
+    </div>
+  );
+}
+
 function Row({ r, opened, picking, picked, may, onPick }: { r: BrowseRow; opened: boolean; picking: boolean; picked: boolean; may: boolean; onPick: (on: boolean) => void }) {
   const word = AUTOCRAFT_WORD[r.autocraft];
   return (
     <li className="relative flex items-start gap-2 px-3 py-2 hover:bg-ink/[0.025]" data-row>
-      {picking && (
-        <label className="relative z-10 -my-2 -ml-2 flex size-11 shrink-0 cursor-pointer items-center justify-center md:-my-1 md:size-8">
-          <input type="checkbox" className="size-4 accent-accent" checked={picked} disabled={!may} onChange={(e) => onPick(e.target.checked)} aria-label={t("Select {ref}", { ref: refOf(r) })} />
-        </label>
-      )}
+      {picking && <Tick label={t("Select {ref}", { ref: refOf(r) })} checked={picked} disabled={!may} onChange={onPick} />}
       <div className="min-w-0 flex-1">
         <ItemRef repo={r.repo} number={r.number} kind={r.kind} state={r.state} draft={r.draft} title={r.title} stretch />
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 pl-6 text-xs text-ink/70">
@@ -236,8 +253,11 @@ function QuickFilters({ q, set, facets, repos, meaning }: { q: string; set: (q: 
   );
 }
 
-/** The command box: free text in the same words as on GitHub and Discord; the reply lines show what ran and what was unclear. */
-function CommandBox({ text, setText, onDone }: { text: string; setText: (s: string) => void; onDone: (r: MaintainCommandResult) => void }) {
+/**
+ * The command box: free text in the same words as on GitHub and Discord, for the ticked `items` or for a list written in the text
+ * (`merge:` then items); the reply lines show what ran and what was unclear. With items ticked it stays in sight while the list scrolls.
+ */
+function CommandBox({ text, setText, items, onClear, onDone }: { text: string; setText: (s: string) => void; items: string[]; onClear: () => void; onDone: (r: MaintainCommandResult) => void }) {
   const api = useApi();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<MaintainCommandResult | null>(null);
@@ -247,7 +267,7 @@ function CommandBox({ text, setText, onDone }: { text: string; setText: (s: stri
     setBusy(true);
     setError(null);
     try {
-      const r = await api.maintain.command(text);
+      const r = await api.maintain.command(text, { items });
       setResult(r);
       onDone(r);
     } catch (e) {
@@ -258,18 +278,26 @@ function CommandBox({ text, setText, onDone }: { text: string; setText: (s: stri
     }
   };
   return (
-    <section aria-label={t("Command")} className="flex flex-col gap-2 rounded-lg border border-line-strong bg-raised p-3">
-      <label htmlFor="items-command" className="text-sm font-medium">
-        {t("Command")}
-      </label>
+    <section aria-label={t("Command")} className={cn("flex flex-col gap-2 rounded-lg border border-line-strong bg-raised p-3", items.length > 0 && "sticky top-2 z-20 shadow-md")}>
+      <div className="flex min-h-8 flex-wrap items-center gap-x-3 gap-y-1">
+        <label htmlFor="items-command" className="text-sm font-medium">
+          {t("Command")}
+        </label>
+        {items.length > 0 && (
+          <>
+            <span className="num text-sm text-ink/70">{items.length === 1 ? t("1 item selected") : t("{n} items selected", { n: num(items.length) })}</span>
+            <Button variant="ghost" size="sm" icon={XIcon} onClick={onClear} className="-ml-1 max-md:h-11">
+              {t("Clear selection")}
+            </Button>
+          </>
+        )}
+      </div>
       <Textarea
         id="items-command"
         value={text}
-        rows={Math.min(8, Math.max(3, text.split("\n").length + 1))}
-        placeholder={"merge:\nphotocraft#123\nphotocraft#456"}
+        rows={items.length ? Math.min(4, Math.max(1, text.split("\n").length)) : Math.min(8, Math.max(3, text.split("\n").length + 1))}
+        placeholder={items.length ? "review and merge" : "merge:\nphotocraft#123\nphotocraft#456"}
         onChange={(e) => setText(e.target.value)}
-        // A list filled from the ticks starts with its colon: the words go in front of it.
-        onFocus={(e) => text.startsWith(":") && e.currentTarget.setSelectionRange(0, 0)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
@@ -283,7 +311,7 @@ function CommandBox({ text, setText, onDone }: { text: string; setText: (s: stri
           {t("Run")}
         </Button>
       </div>
-      <div aria-live="polite" className="flex flex-col gap-1 empty:hidden">
+      <div aria-live="polite" className="flex max-h-40 flex-col gap-1 overflow-y-auto empty:hidden">
         {error && <p className="text-sm text-bad">{error}</p>}
         {result?.lines.map((l, i) => (
           <p key={i} className={cn("text-sm", result.items.length && result.items.every((x) => x.outcome === "run") ? "text-ink/80" : "text-warn")}>
@@ -316,6 +344,7 @@ export function ItemsView(_: ViewProps) {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [cmdOpen, setCmdOpen] = useState(false);
   const [cmd, setCmd] = useState("");
+  const [announced, setAnnounced] = useState("");
   const [sheet, setSheet] = useState(false);
   const filtersButton = useRef<HTMLButtonElement>(null);
   const activeChip = useRef<HTMLButtonElement>(null);
@@ -343,18 +372,21 @@ export function ItemsView(_: ViewProps) {
   const byCreated = parseItemQuery(url.q).sort.by === "created";
   const set = (q: string) => url.go({ q });
 
+  const select = (next: Set<string>) => {
+    setPicked(next);
+    setAnnounced(next.size ? (next.size === 1 ? t("1 item selected") : t("{n} items selected", { n: num(next.size) })) : t("No items selected"));
+  };
   const pick = (refs: string[], on: boolean) => {
     const next = new Set(picked);
     for (const r of refs) if (on) next.add(r); else next.delete(r);
-    setPicked(next);
-    setCmd(withItems(cmd, [...next]));
+    select(next);
     if (next.size) setCmdOpen(true);
   };
+  // The items the command ran on leave the selection; those it refused or could not read stay ticked.
   const done = (r: MaintainCommandResult) => {
-    if (r.items.length && r.items.every((x) => x.outcome === "run")) {
-      setPicked(new Set());
-      setCmd("");
-    }
+    const ran = r.items.filter((x) => x.outcome === "run").map(refOf);
+    if (ran.length && picked.size) select(new Set([...picked].filter((p) => !ran.includes(p))));
+    if (r.items.length && r.items.every((x) => x.outcome === "run")) setCmd("");
   };
 
   const filters = <QuickFilters q={url.q} set={set} facets={counts?.facets ?? null} repos={project ? null : repoList ?? []} meaning={!!split?.words} />;
@@ -369,7 +401,10 @@ export function ItemsView(_: ViewProps) {
             </Button>
           )}
         </div>
-        {writes && cmdOpen && <CommandBox text={cmd} setText={setCmd} onDone={done} />}
+        {writes && cmdOpen && <CommandBox text={cmd} setText={setCmd} items={[...picked]} onClear={() => select(new Set())} onDone={done} />}
+        <p aria-live="polite" className="sr-only">
+          {announced}
+        </p>
 
         <div className="flex gap-2">
           <div className="min-w-0 flex-1">
@@ -432,9 +467,10 @@ export function ItemsView(_: ViewProps) {
           <div className="rounded-lg border border-line px-4 py-6 text-md">{t("No items match.")}</div>
         ) : (
           <div className="rounded-lg border border-line bg-panel">
+            {writes && <SelectAll refs={data.rows.filter((r) => user.runRepos.includes(r.repo)).map(refOf)} picked={picked} onPick={pick} />}
             <ul className="divide-y divide-line" aria-label={preset ? t(preset.label) : t("Items")} onKeyDown={onListKey}>
               {data.rows.map((r) => (
-                <Row key={refOf(r)} r={r} opened={byCreated} picking={writes && cmdOpen} picked={picked.has(refOf(r))} may={user.runRepos.includes(r.repo)} onPick={(on) => pick([refOf(r)], on)} />
+                <Row key={refOf(r)} r={r} opened={byCreated} picking={writes} picked={picked.has(refOf(r))} may={user.runRepos.includes(r.repo)} onPick={(on) => pick([refOf(r)], on)} />
               ))}
             </ul>
             <Pager offset={data.offset} limit={data.limit} total={data.total} onOffset={(o) => url.go({ offset: o })} />

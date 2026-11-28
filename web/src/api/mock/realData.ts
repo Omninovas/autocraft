@@ -241,7 +241,7 @@ function headerOf(r: RealItem): ItemPageHeader {
 export function pageOf(r: RealItem): ItemPageData {
   const history = historyOf(r);
   return withTimeline({
-    repo: r.repo, number: r.number, kind: r.item.kind, state: r.item.state, title: r.item.title, author: r.item.author,
+    repo: r.repo, number: r.number, kind: r.item.kind, state: r.item.state, draft: false, title: r.item.title, author: r.item.author,
     stamp: r.repo + "#" + r.number, header: headerOf(r), status: statusOf(r), bar: barFromStatus(statusOf(r)), costUsd: r.trace.events.reduce((s, e) => s + (e.kind === "model-call" ? (e.call?.costUsd ?? 0) : 0), 0),
     reviews: reviewsOf(r), results: resultsOf(r), history, github: githubOf(r),
   });

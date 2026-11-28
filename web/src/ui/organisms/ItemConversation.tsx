@@ -3,17 +3,17 @@
 // The view follows new entries only while the reader is at the bottom; otherwise it offers "New messages".
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "@phosphor-icons/react";
-import { t } from "../../../../../../src/i18n/index.ts";
-import type { ChatEntry, ItemConversation as Conversation } from "../../../../api/types";
-import { AutoCraftMessage, AutoCraftTurn } from "../../../../ui/molecules/chat/AutoCraftMessage";
-import { ChatBubble, clipName, VEILED } from "../../../../ui/molecules/chat/ChatBubble";
-import { ChatComposer } from "../../../../ui/molecules/chat/ChatComposer";
-import { DiscordLine } from "../../../../ui/molecules/chat/DiscordLine";
-import { GithubLine } from "../../../../ui/molecules/chat/GithubLine";
-import { FOLD_FROM, WorkGroup, WorkRow } from "../../../../ui/molecules/chat/WorkRow";
-import { QueuedLine } from "../../../../ui/molecules/chat/QueuedLine";
-import { RunnerLine } from "../../../../ui/molecules/chat/RunnerLine";
-import { WorkingLine } from "../../../../ui/molecules/chat/WorkingLine";
+import { t } from "../../../../src/i18n/index.ts";
+import type { ChatEntry, ItemConversation as Conversation } from "../../api/types";
+import { AutoCraftMessage, AutoCraftTurn } from "../molecules/chat/AutoCraftMessage";
+import { ChatBubble, clipName, VEILED } from "../molecules/chat/ChatBubble";
+import { ChatComposer } from "../molecules/chat/ChatComposer";
+import { DiscordLine } from "../molecules/chat/DiscordLine";
+import { GithubLine } from "../molecules/chat/GithubLine";
+import { FOLD_FROM, WorkGroup, WorkRow } from "../molecules/chat/WorkRow";
+import { QueuedLine } from "../molecules/chat/QueuedLine";
+import { RunnerLine } from "../molecules/chat/RunnerLine";
+import { WorkingLine } from "../molecules/chat/WorkingLine";
 
 type Said = Extract<ChatEntry, { t: "said" }>;
 type Reply = Extract<ChatEntry, { t: "reply" }>;

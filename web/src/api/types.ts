@@ -2542,6 +2542,8 @@ export interface ItemPageData {
   number: number;
   kind: ItemKind;
   state: ItemState;
+  /** PRs: a draft on GitHub; false for issues. */
+  draft: boolean;
   title: string;
   author: string;
   /** Changes when anything the page shows changes; send it back as `since`. */

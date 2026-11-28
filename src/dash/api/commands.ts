@@ -11,7 +11,7 @@ import { HttpError } from "../server/util.ts";
 import { needVisible, allVisibleRepos } from "./visible.ts";
 import { appSlug } from "../../github/identity.ts";
 import { mentionName, shownMention } from "../../github/slugs.ts";
-import { parse } from "../../workflow/parse.ts";
+import { listForm, parse } from "../../workflow/parse.ts";
 import { runControl, type CommandResult, type ControlInput } from "../../workflow/apply.ts";
 import { refsIn, runText } from "../../workflow/read.ts";
 import { saying } from "../../workflow/said.ts";
@@ -82,7 +82,7 @@ export async function listCommand(db: Db, req: Req): Promise<CommandResult> {
   const named = parsed.kind !== "ambiguous" ? parsed.items?.length ?? 0 : 0;
   if (Math.max(items.length, named) > ITEMS_MAX) throw new HttpError(400, `at most ${ITEMS_MAX} items in one command`);
   // With items given, the text is only the command's words: items it names as well would decide which items it runs on.
-  if (items.length && (named || refsIn(text).length)) return { items: [], lines: [t("Write only the command's words while items are ticked.")] };
+  if (items.length && (named || listForm(text))) return { items: [], lines: [t("Write only the command's words while items are ticked.")] };
   const asked = obj(obj(req.json).asked);
   const own = items.length ? items : refsIn(text).slice(0, ITEMS_MAX);
   const visible = await visibleFn(db, req);

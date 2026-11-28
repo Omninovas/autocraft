@@ -187,6 +187,9 @@ test("a command for a list of items is one message on each item, holding the com
   const res = await listCommand(db, { ...req("operator"), method: "POST", params: {}, json: { text: "merge: photocraft#8", items: ["photocraft#7"] } });
   assert.ok(res.items.length === 0 && res.lines.length === 1);
   assert.equal((await db.all(k.selectFrom("chat_messages").select("id").where("body", "like", "merge%"))).length, 0);
+  // A ref inside the command's own words (a duplicate's original) is no list: it runs on the ticked items.
+  const dup = await listCommand(db, { ...req("operator"), method: "POST", params: {}, json: { text: "close as duplicate of photocraft#12", items: ["photocraft#7", "photocraft#8"] } });
+  assert.deepEqual(dup.items.map((o) => o.number).sort(), [7, 8]);
 });
 
 test("a maintainer's message waiting for Opus can be withdrawn from the chat, and then says who withdrew it", async () => {

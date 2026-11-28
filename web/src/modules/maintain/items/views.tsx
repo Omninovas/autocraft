@@ -323,7 +323,10 @@ export function ItemsView(_: ViewProps) {
 
   useEffect(() => setTyped(url.q), [url.q]);
   // On phones the views scroll sideways: the picked one stays in sight.
-  useEffect(() => activeChip.current?.scrollIntoView({ block: "nearest", inline: "center" }), [url.q]);
+  // A block body: browsers with scroll promises return one from scrollIntoView, and React would call it as the cleanup.
+  useEffect(() => {
+    activeChip.current?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [url.q]);
 
   // A search by meaning embeds the words; the qualifiers still filter its hits, which keep their order.
   const split = url.meaning ? splitWords(url.q) : null;

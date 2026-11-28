@@ -14,6 +14,7 @@ import { LiveDot, MainCiDots, NoRoute, RouteView, ShortcutSheet, UserMenu } from
 import { redirectRoutes } from "./redirects";
 import { ScopePicker, useStalePickCleared } from "./ScopePicker";
 import { SearchBox } from "./SearchBox";
+import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import { useUser } from "./UserContext";
 import { useIsPhone } from "./useMedia";
 import { useTheme } from "./theme";
@@ -266,13 +267,15 @@ export function AppShell() {
   });
 
   const content = (
-    <Routes>
-      {routes.map((r) => (
-        <Route key={r.path} path={r.path} element={<RouteView route={r} />} />
-      ))}
-      {redirectRoutes}
-      <Route path="*" element={<NoRoute hidden={hiddenPaths} />} />
-    </Routes>
+    <RouteErrorBoundary>
+      <Routes>
+        {routes.map((r) => (
+          <Route key={r.path} path={r.path} element={<RouteView route={r} />} />
+        ))}
+        {redirectRoutes}
+        <Route path="*" element={<NoRoute hidden={hiddenPaths} />} />
+      </Routes>
+    </RouteErrorBoundary>
   );
 
   if (phone) {

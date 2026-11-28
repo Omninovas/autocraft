@@ -460,7 +460,7 @@ function CommandBar({ text, setText, items, onClear, onDone, reply, onCloseReply
   };
   return (
     <section aria-label={t("Command")} className="shrink-0 border-t border-line-strong bg-raised shadow-[0_-6px_18px_rgba(0,0,0,0.14)]">
-      <div className="mx-auto flex max-w-[1180px] flex-col gap-2 px-4 py-2.5 md:px-6">
+      <div className="mx-auto flex max-w-[880px] flex-col gap-2 px-4 py-2.5 md:px-6">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {items.length > 0 ? (
             <span className="flex items-center gap-1">
@@ -736,7 +736,7 @@ export function ItemsView(props: ViewProps) {
   const list = (
     <div className="flex h-full min-w-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-[1180px] flex-col gap-3 px-4 pb-6 pt-5 md:px-6">
+        <div className="mx-auto flex max-w-[880px] flex-col gap-3 px-4 pb-6 pt-5 md:px-6">
           <h1 ref={heading} tabIndex={-1} className="text-xl font-semibold outline-none">
             {t("Items")}
           </h1>

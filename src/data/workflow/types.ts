@@ -44,7 +44,7 @@ export type NewWorkflow = {
 export type WorkflowPatch = Partial<Omit<ItemWorkflow, "id" | "repo" | "number" | "kind" | "startedBy" | "startedAt" | "startedVia" | "prNumber" | "version" | "updatedAt">>;
 /** An implement workflow of an issue and the PR it works on. */
 export type WorkflowLink = { workflowId: number; repo: string; issue: number; pr: number; live: boolean };
-export type WorkflowFilter = { live?: boolean; ids?: number[]; repos?: string[]; refs?: { repo: string; number: number }[]; states?: WorkflowState[]; logins?: string[]; approved?: boolean; recAfter?: string };
+export type WorkflowFilter = { live?: boolean; ids?: number[]; repos?: string[]; refs?: { repo: string; number: number }[]; states?: WorkflowState[]; logins?: string[]; approved?: boolean; recAfter?: string; /** The row's own blocker column, a retired blocker included (workflowOf reads one as `other`). */ storedBlockers?: string[] };
 /** `via` defaults to `cli` (the archived rows of retired decisions have no surface). */
 export type WorkflowEvent = { workflowId: number | null; repo: string; number: number; login: string; kind: WorkflowEventKind | "archived"; via?: Surface | null; parsed?: Parsed | null; line?: string | null; at?: string; /** An answer's: when its question was asked. */ seenAt?: string | null };
 /** Up to when a person has seen an item and chose to go on with it (`since`), when they said so (`said`), and when someone last resumed it. */

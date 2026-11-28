@@ -1,6 +1,6 @@
 // The follow-up issue of a PR a maintainer approved for merge: what its reviews found that does not stop the merge, filed so that a
 // maintainer finds it in the item queue like any issue. Two sources: the Opus review's fixes and hold that do not block
-// (src/core/review-blocking.ts), which are not made, with its code-incomplete claims that no fix covers (followUpClaims), and the
+// (src/core/review-blocking.ts), which are not made, its changes outside the PR's purpose, with its code-incomplete claims that no fix covers (followUpClaims), and the
 // pre-merge review's defects that do not block (src/premerge/types.ts followUpDefects). One issue per PR, opened by the first filing; a later head's or source's follow-ups are a comment on it. Runs the
 // Plan's `followups` actions (src/core/decide.ts followUpsDue, reviewFollowUpsDue); the PR's merge waits for the try, not for its success.
 //
@@ -34,6 +34,8 @@ import { followUpDefects, type PremergeFinding } from "./types.ts";
 export const ACTOR = "premerge-followup";
 /** The title of a hold's follow-up, which names no file. */
 const HOLD_TITLE = "Open question from the review";
+/** The title of the follow-up for changes outside the PR's purpose, which names no file: a PR files it once. */
+const OUTSIDE_TITLE = "Changes outside the pull request's purpose";
 const SHORT_TITLE = 80;
 
 export type FollowupsParams = { repo: string; limit?: number; onHandled?: (n: number) => void; by?: By };
@@ -61,12 +63,13 @@ export type FollowupEntry = { title: string; where: string; text: string; why: s
 const premergeEntries = (fs: readonly PremergeFinding[]): FollowupEntry[] =>
   followUpDefects(fs).map((f) => ({ title: f.title, where: `${f.file}${f.line ? `:${f.line}` : ""}`, text: f.scenario, why: f.blocking?.why ?? "" }));
 
-/** The Opus review's fixes that do not block the merge and nobody dropped (`dropped`), and the reason of its hold when that does not block it. */
+/** The Opus review's fixes that do not block the merge and nobody dropped (`dropped`), the reason of its hold when that does not block it, and its lines outside the PR's purpose. */
 export const reviewEntries = (r: Pick<ReviewRow, "verdict" | "fixes" | "workflow" | "blocked_by">, dropped: readonly string[] | undefined): FollowupEntry[] => {
-  const { fixes, hold } = reviewFollowUps({ ...r, hold: r.workflow?.hold, blockedBy: r.blocked_by }, dropped);
+  const { fixes, hold, outside } = reviewFollowUps({ ...r, hold: r.workflow?.hold, blockedBy: r.blocked_by, outside: r.workflow?.outside_purpose }, dropped);
   return [
     ...fixes.map((x) => ({ title: partTitle(x), where: x.file, text: x.change, why: x.blocking?.why ?? "" })),
     ...(hold ? [{ title: HOLD_TITLE, where: "", text: hold, why: "" }] : []),
+    ...(outside ? [{ title: OUTSIDE_TITLE, where: "", text: `${outside.lines} changed lines: ${outside.note.trim()}`, why: "" }] : []),
   ];
 };
 

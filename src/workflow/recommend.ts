@@ -143,7 +143,7 @@ export const afterPush = (rec: Recommendation): Recommendation => ({ ...rec, tex
  * What an item stopped at a blocker comes back with. A yes resumes the plan with the merge still approved:
  * - a failing step runs again (the fix-up of the planned parts, a new review for a failing CI fix; a stuck implementation comes back through question.ts);
  * - findings of the pre-merge review (`params.premerge`: their plan parts) are fixed first, never merged as they are;
- * - a major finding or a change outside the purpose takes the review's own recommendation when it gave one;
+ * - a major finding takes the review's own recommendation when it gave one;
  * - the author's commits that the review round found beyond what was approved are kept; where the round had no review, they are reviewed;
  * - for the rest, what the blocker was about is accepted as it is.
  */
@@ -187,12 +187,10 @@ export function atBlocker(found: Found, review: ReviewView | null, plan: readonl
     }
     // The fix-up a leg stopped at pushed nothing.
     case "beyond-agreed": return go(t("Keep the changes to {files}, then merge.", { files: listText((p.files as string[] | undefined) ?? []) }));
-    case "outside-purpose":
     case "major-finding": {
       if (review?.rec) return afterSteps(review, plan);
       const fix = planned(plan).filter((n) => plan.find((x) => x.n === n)?.major);
       if (fix.length) return { text: fixText(fix, true), parts: { fix, drop }, merges: true };
-      if (found.blocker === "outside-purpose") return go(t("Keep the {lines} lines outside the purpose, then merge.", { lines: Number(p.lines ?? 0) }));
       // A review that says hold or close and recommends nothing never said to merge: the question says what it found and offers only what it says.
       const verdict = review?.verdict ?? p.verdict;
       if (verdict === "hold" || verdict === "close") return holdOrClose(verdict, review?.finding ?? null, drop);

@@ -20,7 +20,7 @@ export const shownWorkflow = (history: readonly ItemWorkflow[]): ItemWorkflow | 
 };
 
 /** The six blockers that bring an approved item back to a person, and `other` for a stop outside them (its reason shown as given). */
-export type Blocker = "major-finding" | "author-commits" | "failed-twice" | "beyond-agreed" | "outside-purpose" | "other";
+export type Blocker = "major-finding" | "author-commits" | "failed-twice" | "beyond-agreed" | "other";
 
 export const WEIGHT_MIN = 1;
 export const WEIGHT_MAX = 10;

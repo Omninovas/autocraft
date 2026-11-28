@@ -1,5 +1,6 @@
 // The advance pass of the maintainer workflow (src/workflow/advance.ts) with the merge leg (src/preapproval): blockers stop an
-// approved item and keep its approval, a yes resumes it, and an approved review entry with minor findings is fixed, then merged.
+// approved item and keep its approval, a yes resumes it, and an approved review entry with minor findings is fixed, then merged,
+// also past changes outside the PR's purpose.
 // An implement issue's plan question comes back as its recommendation, and answers on the issue reach its implementation PR.
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -25,6 +26,7 @@ import { currentAttempt, writeStep } from "../src/implement/attempt.ts";
 import { openQuestion } from "../src/implement/questions.ts";
 import { recordSteps, startAttempt } from "../src/data/implement/index.ts";
 import { applyStuckAnswer, markStuck } from "../src/implement/stuck.ts";
+import { resumeOutsideStops } from "../src/workflow/outside-resume.ts";
 import { actor, approvedReview, asked, ASKS, fixup, implementationOpened, implementIssue, keep, labelOf, later, leg8, legState, MAINT, nextStep, ownPush, review, review8, say } from "./workflow-advance-world.ts";
 
 test("each blocker stops an approved item and keeps its approval", async () => {
@@ -40,7 +42,6 @@ test("each blocker stops an approved item and keeps its approval", async () => {
       await review(w, { head: "sha1", verdict: "take-fix", fixes: [{ file: "src/lib.rs", change: "check the bound", title: "bound check" }], at: "2026-01-01T00:00:00Z" });
       await fixup(w, { state: "pushed", files: ["src/lib.rs", "src/other.rs"], patch: "+a\n-b" });
     }],
-    ["outside-purpose", (w) => review(w, { head: "sha1", verdict: "take", outside: 60 })],
   ];
   for (const [blocker, evidence] of cases) {
     const w = await approvedReview();
@@ -52,6 +53,21 @@ test("each blocker stops an approved item and keeps its approval", async () => {
     assert.notEqual(await legState(w), "review", `${blocker}: the merge leg stops`);
     w.close();
   }
+});
+
+test("an approved workflow an earlier release stopped at changes outside its purpose resumes with its approval; one stopped for another reason waits", async () => {
+  const w = await approvedReview();
+  await w.pr(2, { label: "feature" });
+  assert.equal((await runCommand(w.db, actor, "dashboard", { parsed: parse("review and merge"), items: [{ repo: "app", number: 2 }] })).items[0]!.outcome, "run");
+  const stop = (n: number, blocker: string) => w.db.run(w.db.k.updateTable("main.item_workflows").where("number", "=", n)
+    .set({ state: "blocked", blocker, blocker_params: "{}", rec: JSON.stringify({ text: "Fix 1, then merge.", parts: { fix: [1], drop: [] }, merges: true }), rec_at: later(), rec_head: "sha1" }));
+  await stop(1, "outside-purpose");
+  await stop(2, "major-finding");
+  assert.deepEqual(await resumeOutsideStops(w.db), ["app#1"]);
+  const [one, two] = [(await liveWorkflow(w.db, "app", 1))!, (await liveWorkflow(w.db, "app", 2))!];
+  assert.deepEqual([one.state, one.blocker, one.rec, one.approvedBy], ["running", null, null, MAINT]);
+  assert.deepEqual([two.state, two.blocker], ["blocked", "major-finding"]);
+  w.close();
 });
 
 test("however much our own pushes change, they never stop an approved item", async () => {
@@ -169,13 +185,13 @@ test("an answer that runs nothing leaves the PR alone until someone starts it; a
   assert.equal(await merges(2), true);
 });
 
-test("an approved review entry with minor findings is fixed, reviewed again and handed to the merge queue as the approver", async () => {
+test("an approved review entry with minor findings and changes outside its purpose is fixed, reviewed again and handed to the merge queue as the approver", async () => {
   const w = await approvedReview();
   const db = w.db;
   // Reviews in the order a real run makes them: this one, the next at the pushed head, then the hand-over's Merge answer.
-  await review(w, { head: "sha1", verdict: "take-fix", sure: false, at: new Date().toISOString(), fixes: [{ file: "src/lib.rs", change: "rename a to b", title: "clearer name", major: false }] });
+  await review(w, { head: "sha1", verdict: "take-fix", sure: false, at: new Date().toISOString(), outside: 60, fixes: [{ file: "src/lib.rs", change: "rename a to b", title: "clearer name", major: false }] });
   await advanceWorkflows(db);
-  assert.equal((await liveWorkflow(db, "app", 1))!.state, "running", "a minor finding of an unsure review is no blocker for an approved item");
+  assert.deepEqual([(await liveWorkflow(db, "app", 1))!.state, (await liveWorkflow(db, "app", 1))!.blocker], ["running", null], "neither a minor finding of an unsure review nor lines outside the purpose stop an approved item");
   assert.ok((await w.prPlan(1)).actions.some((a) => a.kind === "fixup" && a.params?.source === "review"), "the review's fix-up runs");
 
   // The fix-up pushes; our own push moves the head the workflow accepted.
@@ -392,7 +408,6 @@ test("the other blockers stop an approved implementation too", async () => {
   const cases: [Blocker, (w: World) => Promise<unknown>][] = [
     ["author-commits", (w) => w.synced(8, "theirs")],
     ["major-finding", (w) => review8(w, "hold")],
-    ["outside-purpose", (w) => review8(w, "take", { outside_purpose: { lines: 60, note: "n" }, recommendation: null })],
     ["failed-twice", async (w) => { for (const state of ["failed", "rejected"]) await w.db.run(w.db.k.insertInto("main.ci_fixes").values({ repo: "app", number: 8, head: "sha8", kind: "patch", state, attempt: state === "failed" ? 1 : 2, created_at: later() })); }],
   ];
   for (const [blocker, evidence] of cases) {

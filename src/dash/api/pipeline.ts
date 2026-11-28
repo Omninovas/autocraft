@@ -22,7 +22,6 @@ import { canSeeInternals } from "./staff.ts";
 import { SECURITY_PREFIX, SECURITY_STEP } from "../../security/rules.ts";
 import { mapSeq } from "../../async-seq.ts";
 import type { Db } from "../../db/index.ts";
-import { OUTSIDE_PURPOSE_KEY, outsidePurposeMin } from "../../workflow/settings.ts";
 
 // Stages of docs/pipeline.md. A stage with registered steps shows them; the
 // mirror also runs on its own timer.
@@ -44,12 +43,12 @@ function requireOperator(req: Req, step?: StepDef): void {
 
 /** The pipeline state for the requester: reasons that name a hidden repo and trips on one are left out. */
 async function pipelineState(db: Db, req: Req): Promise<PipelineState> {
-  const [s, hidden, outside, minLines] = await Promise.all([rawPipelineState(db), hiddenRepos(db, req), hiddenRepos(db, req).then((h) => outsideState(db, h)), outsidePurposeMin(db)]);
+  const [s, hidden, outside] = await Promise.all([rawPipelineState(db), hiddenRepos(db, req), hiddenRepos(db, req).then((h) => outsideState(db, h))]);
   const limits = await mapSeq(s.limits, async ({ trips, ...l }) => {
     const shown = await mapSeq((trips ?? []).filter((t) => t.repo === null || !isHiddenRepo(hidden, t.repo)), async (t) => ({ ...t, reason: blankIfHidden(t.reason, hidden), canResume: await mayResumeTrip(db, req.user, t.key) }));
     return { ...l, pausedReason: blankIfHidden(l.pausedReason, hidden) || null, status: blankIfHidden(l.status, hidden) || null, ...(shown.length ? { trips: shown } : {}) };
   });
-  return { ...s, outside, limits, blockers: { outsidePurposeMin: minLines } };
+  return { ...s, outside, limits };
 }
 
 /** Viewers read that a job failed, not why: the error carries log and command text. */
@@ -207,22 +206,6 @@ export async function putState(db: Db, req: Req) {
   const was = (await rawPipelineState(db)).enabled;
   await setEnabled(db, b.enabled, req.user.login);
   await audit(db, req.user.login, "pipeline-switch", "pipeline", { enabled: b.enabled, was });
-  return pipelineState(db, req);
-}
-
-/** The threshold of the workflow blocker for a change outside the PR's purpose: a change of at least `outsidePurposeMin` lines outside the PR's purpose. */
-export async function putBlockers(db: Db, req: Req) {
-  requireOperator(req);
-  const b = body(req);
-  const rows: [string, string, number][] = [[OUTSIDE_PURPOSE_KEY, "outsidePurposeMin", await outsidePurposeMin(db)]];
-  const was = { outsidePurposeMin: rows[0]![2] };
-  for (const [key, field] of rows) {
-    const v = b[field];
-    if (v === undefined) continue;
-    if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 1_000_000) throw new HttpError(400, `${field} must be a whole number from 1 to 1000000`);
-    await writeSetting(db, key, String(v));
-  }
-  await audit(db, req.user.login, "blocker-thresholds", "pipeline", { was, ...b });
   return pipelineState(db, req);
 }
 

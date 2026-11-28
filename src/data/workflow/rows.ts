@@ -39,6 +39,17 @@ export type WorkflowRow = {
   updated_at: string; step: string | null; pr_number: number | string | null; version: number; accepted_head: string | null; review_asked_at: string | null; taken_by: string | null;
 };
 
+/** Blockers earlier releases wrote that no longer exist; a row stopped at one reads as `other` until src/workflow/outside-resume.ts resumes it. */
+const RETIRED_BLOCKERS: readonly string[] = ["large-fix", "outside-purpose"];
+
+/** What a held row goes back to: a question at a retired blocker is no question any more, so a resume runs on. */
+function heldParams(p: Record<string, unknown> | null): Record<string, unknown> | null {
+  const held = p?.held as { rec?: unknown; blocker?: unknown; params?: unknown } | undefined;
+  if (!held || typeof held.blocker !== "string" || !RETIRED_BLOCKERS.includes(held.blocker)) return p;
+  const { rec: _rec, blocker: _blocker, params: _params, ...rest } = held;
+  return { ...p, held: rest };
+}
+
 /** An `item_workflows` row as the domain type (the module's one mapper). */
 export function workflowOf(r: WorkflowRow): ItemWorkflow {
   return {
@@ -46,7 +57,7 @@ export function workflowOf(r: WorkflowRow): ItemWorkflow {
     startedBy: r.started_by, startedAt: r.started_at, startedVia: r.started_via as Surface, baseHead: r.base_head, acceptedHead: r.accepted_head,
     approvedBy: r.approved_by, approvedAt: r.approved_at, approvedVia: r.approved_via as Surface | null,
     stoppedBy: r.stopped_by, stoppedAt: r.stopped_at, takenBy: r.taken_by ?? null,
-    blocker: (r.blocker === "large-fix" ? "other" : r.blocker) as Blocker | null, blockerParams: parse<Record<string, unknown> | null>(r.blocker_params, null),
+    blocker: (r.blocker !== null && RETIRED_BLOCKERS.includes(r.blocker) ? "other" : r.blocker) as Blocker | null, blockerParams: heldParams(parse<Record<string, unknown> | null>(r.blocker_params, null)),
     rec: parse<Recommendation | null>(r.rec, null), recAt: r.rec_at, recHead: r.rec_head,
     plan: parse<PlanPart[]>(r.plan, []), step: r.step, prNumber: r.pr_number === null ? null : Number(r.pr_number), reviewAskedAt: r.review_asked_at, legacyPreapprovalId: r.legacy_preapproval_id === null ? null : Number(r.legacy_preapproval_id), version: Number(r.version), updatedAt: r.updated_at,
   };
@@ -171,7 +182,7 @@ export async function loadWorkflowFacts(db: Db, keys: KeySource, o: { nowMs?: nu
 
 /** Filter loader ordered by id. An empty list in any filter matches nothing. */
 export async function listWorkflows(db: Db, f: WorkflowFilter = {}): Promise<ItemWorkflow[]> {
-  if (f.ids?.length === 0 || f.refs?.length === 0 || f.repos?.length === 0 || f.states?.length === 0 || f.logins?.length === 0) return [];
+  if (f.ids?.length === 0 || f.refs?.length === 0 || f.repos?.length === 0 || f.states?.length === 0 || f.logins?.length === 0 || f.storedBlockers?.length === 0) return [];
   const q = queryDb(db);
   const rows = await q.all((q.k as any).selectFrom("main.item_workflows as w").selectAll("w")
     .$if(!!f.ids, (b: any) => b.where(kx.inList(db, "w.id", f.ids!, "bigint")))
@@ -182,6 +193,7 @@ export async function listWorkflows(db: Db, f: WorkflowFilter = {}): Promise<Ite
     .$if(!!f.logins, (b: any) => b.where((eb: any) => eb.or([loginIn(db, eb, "w.started_by", f.logins!, "ls"), loginIn(db, eb, "w.approved_by", f.logins!, "la")])))
     .$if(f.approved !== undefined, (b: any) => b.where("w.approved_by", f.approved ? "is not" : "is", null))
     .$if(f.recAfter !== undefined, (b: any) => b.where("w.rec_at", ">", f.recAfter!))
+    .$if(!!f.storedBlockers, (b: any) => b.where(kx.inList(db, "w.blocker", f.storedBlockers!)))
     .orderBy("w.id")) as WorkflowRow[];
   return rows.map(workflowOf);
 }

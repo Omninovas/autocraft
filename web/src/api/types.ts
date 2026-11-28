@@ -995,7 +995,7 @@ export type StageLimit = { step: string; title: string; perDay: number | null; u
   trips?: StageTrip[];
   /** What the stage is doing when nothing pauses it: "running", "queued", or why it is not starting ("nothing to do", "waiting for CI on 3 PRs in x"). */
   status?: string | null };
-export type PipelineState = { enabled: boolean; /** Switched to drain: no new jobs, jobs already running keep their writes; shown as "Draining". Never true with enabled. */ draining: boolean; changedBy: string | null; changedAt: string | null; heartbeat: string | null; limits: StageLimit[]; outside: OutsideState; /** Thresholds of the workflow blockers for changes outside a PR's purpose. */ blockers: { outsidePurposeMin: number } };
+export type PipelineState = { enabled: boolean; /** Switched to drain: no new jobs, jobs already running keep their writes; shown as "Draining". Never true with enabled. */ draining: boolean; changedBy: string | null; changedAt: string | null; heartbeat: string | null; limits: StageLimit[]; outside: OutsideState };
 
 export interface PipelineStep {
   name: string;

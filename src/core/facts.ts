@@ -421,7 +421,7 @@ async function buildPr(db: Db, d: PrPassData, ref: string, m: Mirrored, c: Ctx):
     const claimsOwed = source ? followUpClaims({ ...source, verdict: source.sourceVerdict }, take).length : 0;
     base.review = {
       head: qh, at: qAt, verdict: verdict!, unsure, reason: latest!.reason ?? "", fixes: fixes.length,
-      followUps: !approved ? 0 : filingHead !== qh ? 1 : (({ fixes: x, hold }) => x.length + (hold ? 1 : 0))(reviewFollowUps({ ...latest!, hold: latest!.workflow?.hold, blockedBy: latest!.blocked_by }, wfFact?.dropped)) + claimsOwed,
+      followUps: !approved ? 0 : filingHead !== qh ? 1 : (({ fixes: x, hold, outside }) => x.length + (hold ? 1 : 0) + (outside ? 1 : 0))(reviewFollowUps({ ...latest!, hold: latest!.workflow?.hold, blockedBy: latest!.blocked_by, outside: latest!.workflow?.outside_purpose }, wfFact?.dropped)) + claimsOwed,
       filingHead,
       leadsToHead: !!head && (qh === head || pushChainOf(patch.pushes, head).includes(qh)),
       stale: c.stale.has(`${ref}@${qh}`), staleActionable: c.staleActionable.has(`${ref}@${qh}`),

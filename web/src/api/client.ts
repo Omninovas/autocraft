@@ -378,7 +378,6 @@ export interface Api {
     /** Operator only: clears the warning about jobs of a step the runner stopped for running past their limit. */
     ackDeadline(step: string): Promise<{ ok: true }>;
     /** Operator only: the two blocker thresholds (changed lines). */
-    setBlockers(input: Partial<PipelineState["blockers"]>): Promise<PipelineState>;
   };
 
   /** Agent runs (one model call each): keyset-paged, filtered on the server. */

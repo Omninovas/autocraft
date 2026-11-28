@@ -11,7 +11,7 @@ import { auditIdentity, githubIdentity } from "../github/identity.ts";
 import { ownerOf } from "../owners.ts";
 import { planned, runnable } from "../core/select.ts";
 import { isQueueState, type PrFacts } from "../core/plan.ts";
-import { fixesToMake, followUpClaims, reviewFollowUps } from "../core/review-blocking.ts";
+import { fixesToMake, followUpClaims, outsideText, reviewFollowUps } from "../core/review-blocking.ts";
 import { claimFindings } from "../premerge/parse.ts";
 import { mayRun } from "../core/authority.ts";
 import { partTitle } from "../workflow/work.ts";
@@ -89,9 +89,9 @@ async function postsDue(db: Db, repo: string, by: By): Promise<{ due: PostCandid
  */
 function postFollowUps(o: PostSource, f: PrFacts): { fixes: string[]; later: string[]; notFiled: string | null } | null {
   if (!f.workflow?.approved) return null;
-  const fu = reviewFollowUps({ verdict: o.sourceVerdict, fixes: o.fixes, hold: o.hold, blockedBy: o.blockedBy }, f.workflow.dropped);
+  const fu = reviewFollowUps({ verdict: o.sourceVerdict, fixes: o.fixes, hold: o.hold, blockedBy: o.blockedBy, outside: o.outside }, f.workflow.dropped);
   const claims = claimFindings(followUpClaims({ ...o, verdict: o.sourceVerdict }, f.review?.verdict === "take" || f.review?.verdict === "take-fix"), []).map((x) => x.title);
-  const later = [...fu.fixes.map(partTitle), ...(fu.hold ? [fu.hold] : []), ...claims];
+  const later = [...fu.fixes.map(partTitle), ...(fu.hold ? [fu.hold] : []), ...(fu.outside ? [outsideText(fu.outside)] : []), ...claims];
   if (!later.length) return null;
   // The same gate as the filing itself (src/core/decide.ts reviewFollowUpsDue): a refused one says why.
   const may = mayRun({ facts: f, action: { kind: "followups", head: f.head } }, "pipeline");

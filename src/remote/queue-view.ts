@@ -36,11 +36,11 @@ export type WhyCall = { tier: Tier; promptId: string; step: string; repos: reado
   bound?: { login: string; shown: boolean; took?: readonly string[] } | null;
   /** The one person whose runner it waits for (waitOf); `shown` as for `bound`. */
   waits?: ({ kind: "owner-off" } & RunnerWait | { kind: "owner"; login: string } | { kind: "login"; login: string; renewsAt: number }) & { shown: boolean } | null;
-  /** The lowercase login whose runners skip it after their give-back, until when (cands.ts releaseSkip); `shown` as for `bound`. */
+  /** The lowercase login whose runners skip it after their give-back or failed try, until when (cands.ts releaseSkip); `shown` as for `bound`. */
   released?: { login: string; until: number; shown: boolean } | null };
 
-const givenBack = (r: NonNullable<WhyCall["released"]>, login = r.login): string =>
-  r.shown ? t("Given back by {login}'s Task Runner; it may take it again at {time} UTC", { login, time: hhmm(r.until) }) : t("Waiting for a Task Runner");
+const skippedBy = (r: NonNullable<WhyCall["released"]>, login = r.login): string =>
+  r.shown ? t("Skipped by {login}'s Task Runner until {time} UTC after its last try", { login, time: hhmm(r.until) }) : t("Waiting for a Task Runner");
 
 /**
  * Why a queued call waits, most specific first: its pick; the runner that holds its session; the user it is bound to (their
@@ -49,8 +49,8 @@ const givenBack = (r: NonNullable<WhyCall["released"]>, login = r.login): string
  * that takes it waits to renew (takers.ts loginWaitIn); no ready runner for its tier;
  * every such runner Manual only; no such runner's user may take it (role rules, write permission as last confirmed, My
  * repos); none of them takes its task (my-tasks.ts); none of those takes its items (task-items.ts); every runner that may take
- * it busy; else the calls ahead of it. A give-back's skip (WhyCall.released) is the reason while the runners of the login that gave
- * it back are the only ones that would take it.
+ * it busy; else the calls ahead of it. The skip after a give-back or failed try (WhyCall.released) is the reason while the runners
+ * of the login that skip it are the only ones that would take it.
  */
 export function whyWaiting(c: WhyCall, runners: readonly ReadyRunner[], ahead: number, canWrite: (login: string, repo: string) => boolean): { code: ModelQueueWhyCode; text: string } {
   if (c.picked) return { code: "picked", text: c.picked.login ? `Picked by ${c.picked.login}` : "Picked by a user" };
@@ -65,20 +65,21 @@ export function whyWaiting(c: WhyCall, runners: readonly ReadyRunner[], ahead: n
       return { code: "bound", text: taker.free > 0 ? t("Next on {theirs}, which took the work while {whose} is not ready", { theirs, whose }) : t("Waiting for {theirs}, which took the work while {whose} is not ready: it is busy", { theirs, whose }) };
     }
     if (!own.length) return { code: "bound-off", text: c.bound.took?.length ? t("Runs on {whose}, or on a Task Runner that took the work; none is ready", { whose }) : `Runs only on ${whose}, which is not ready` };
-    if (c.released?.login === c.bound.login.toLowerCase()) return { code: "bound", text: givenBack(c.released, c.bound.login) };
+    if (c.released?.login === c.bound.login.toLowerCase()) return { code: "bound", text: skippedBy(c.released, c.bound.login) };
     return { code: "bound", text: own.some((r) => r.free > 0) ? `Next on ${whose}` : `Waiting for ${whose}: it is busy` };
   }
   const w = c.waits;
   if (w?.kind === "owner-off") return { code: "owner-off", text: runnerWaitText(w, w.shown) };
-  if (w?.kind === "owner" && c.released?.login === w.login.toLowerCase()) return { code: "owner", text: givenBack(c.released, w.login) };
+  if (w?.kind === "owner" && c.released?.login === w.login.toLowerCase()) return { code: "owner", text: skippedBy(c.released, w.login) };
   if (w?.kind === "owner") return { code: "owner", text: w.shown ? t("Held for {login}'s Task Runner: the work is theirs", { login: w.login }) : t("Waiting for a Task Runner") };
   if (w?.kind === "login") return { code: "login", text: runnerWaitText(w, w.shown) };
   const rel = c.released;
   if (!rel) return takerWhy(c, runners, ahead, canWrite);
   const rest = takerWhy(c, runners.filter((r) => r.login.toLowerCase() !== rel.login), ahead, canWrite);
   if (rest.code === "behind" || rest.code === "busy") return rest;
-  const theirs = runners.find((r) => r.login.toLowerCase() === rel.login && r.tiers.has(c.tier));
-  return theirs ? { code: "login", text: givenBack(rel, theirs.login) } : rest;
+  const theirs = runners.filter((r) => r.login.toLowerCase() === rel.login);
+  const mine = takerWhy(c, theirs, ahead, canWrite);
+  return mine.code === "behind" || mine.code === "busy" ? { code: "login", text: skippedBy(rel, theirs[0]!.login) } : rest;
 }
 
 /** whyWaiting past the call's pick, session, binding and people: what the ready runners' tiers, modes, rules, tasks, items and room say. */

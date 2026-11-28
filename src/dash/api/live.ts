@@ -3,6 +3,7 @@
 // ended in the last minutes stay on it, faded. Repos the reader cannot see are left out. Staff also get the worker view: one row per
 // Task Runner (a person's own tokens; private ones share one neutral row) and Jev, with the model calls each ran in the last hour.
 import type { ItemRef, ItemShown, LiveBoard, LiveEstimate, LiveLane, LiveOp, LiveOpKind, LiveWorker } from "../../../web/src/api/types.ts";
+import { shownLabel } from "../../remote/runner-label.ts";
 import { STATUS_FRESH_MS } from "../../data/runners/index.ts";
 import type { HiddenRepos } from "../../data/control/index.ts";
 import type { JobCall, RunRow } from "../../data/inference/index.ts";
@@ -144,14 +145,6 @@ export const PRIVATE_RUNNER = "Private Task Runner";
 /** Whether the reader must not learn who owns a runner: its owner keeps it private, and is someone else. */
 const privateTo = (req: Req, owners: ReadonlySet<string>) => (login: string): boolean => owners.has(login.toLowerCase()) && login.toLowerCase() !== req.user.login.toLowerCase();
 
-/** A runner's label as the board may show it: never the machine's hostname, which a label defaults to (device-login.ts). */
-function shownLabel(label: string | null, machine: { hostname?: string } | null): string | null {
-  if (!label) return null;
-  const host = String(machine?.hostname ?? "");
-  const l = label.trim().toLowerCase();
-  const h = host.trim().toLowerCase();
-  return h && (l === h.slice(0, 60) || l === h.split(".")[0]) ? null : label;
-}
 
 /** The distinct models a runner's status offers (tier to model). */
 function modelsOf(models: RunnerRow["models"]): string[] {

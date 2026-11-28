@@ -1,12 +1,13 @@
-// The Agents page: model calls running now, recent calls with server-side filters and keyset paging,
-// and a detail panel with the rendered prompt and the output. Operators and maintainers also filter the
-// calls a model's safety filter refused, with their counts per prompt, repo, model and Task Runner user.
-import { useState, type ReactNode } from "react";
+// The Agents page: one list of model calls in three parts, Running, Waiting (the queued calls with why each waits) and Finished
+// (newest first, keyset-paged), narrowed by the filters in the URL (runner, person, repo, step, state), and a detail panel with the
+// rendered prompt and the output. Operators and maintainers also filter the calls a model's safety filter refused, with their
+// counts per prompt, repo, model and Task Runner user.
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Dialog } from "radix-ui";
-import { CaretDownIcon, CaretRightIcon, XIcon } from "@phosphor-icons/react";
-import { usePagedQuery, useQuery } from "../../api/client";
-import type { AgentRun, AgentRunDetail, AgentRunFilter, AgentRunPage, AgentRunRefusal, AgentRunState, RefusalGroup, RefusalWindow } from "../../api/types";
+import { Dialog as Sheet } from "radix-ui";
+import { CaretDownIcon, CaretRightIcon, FunnelIcon, XIcon } from "@phosphor-icons/react";
+import { useApi, usePagedQuery, useQuery } from "../../api/client";
+import type { AgentRun, AgentRunDetail, AgentRunFilter, AgentRunRefusal, AgentRunState, ModelQueue, ModelQueueFilter, RefusalGroup, RefusalWindow } from "../../api/types";
 import { t } from "../../../../src/i18n/index.ts";
 import { useUser } from "../../shell/UserContext";
 import { can } from "../../registry/permissions";
@@ -14,15 +15,22 @@ import { Chip } from "../../ui/atoms/Chip";
 import { Segmented } from "../../ui/molecules/Segmented";
 import type { ViewProps } from "../../registry/types";
 import { nowMs, num, span } from "../../lib/format";
+import { formatCost } from "../../lib/trace";
+import { useUrlState, useWrite } from "../../lib/hooks";
 import { TimeAgo } from "../../ui/atoms/TimeAgo";
 import { useNow } from "../../lib/useNow";
 import { Badge, type Tone } from "../../ui/atoms/Badge";
 import { Button } from "../../ui/atoms/Button";
+import { EmptyState } from "../../ui/atoms/EmptyState";
+import { ErrorLine } from "../../ui/atoms/ErrorLine";
+import { Block } from "../../ui/molecules/Block";
+import { Dialog } from "../../ui/molecules/Dialog";
+import { QuickSelect } from "../../ui/molecules/QuickSelect";
 import { RemoteVia } from "../../ui/molecules/RemoteVia";
 import { ItemRef } from "../../ui/molecules/ItemRef";
+import { Page } from "../../ui/organisms/Page";
+import { QueuedCallRow } from "../../ui/organisms/QueuedCallRow";
 import { cn } from "../../ui/cn";
-import { Block, ErrorLine, Page, selectCls, useUrlState } from "../admin/parts";
-import { RunsQueueSwitch } from "./queue";
 import { TranscriptLinks } from "./transcript";
 
 const STATE_TONE: Record<AgentRunState, Tone> = { running: "accent", done: "ok", failed: "bad" };
@@ -45,99 +53,62 @@ function Items({ r, max = 3, expandable }: { r: AgentRun; max?: number; expandab
       {more > 0 &&
         (expandable && !all && r.items.length > shown.length ? (
           <button onClick={() => setAll(true)} className="relative z-10 text-xs text-accent-ink hover:underline max-md:min-h-11">
-            +{num(more)} more
+            {t("+{n} more", { n: num(more) })}
           </button>
         ) : (
-          <span className="text-xs text-ink/50">+{num(more)} more</span>
+          <span className="text-xs text-ink/50">{t("+{n} more", { n: num(more) })}</span>
         ))}
     </span>
   );
 }
 
-const who = (r: AgentRun): ReactNode => (r.provider === "jev" ? "Jev" : r.via ? <RemoteVia via={r.via} /> : "–");
+const who = (r: AgentRun, compact?: boolean): ReactNode => (r.provider === "jev" ? "Jev" : r.via ? <RemoteVia via={r.via} compact={compact} /> : "–");
 
-// ---- running now ---------------------------------------------------------------
+// ---- filters -------------------------------------------------------------------
 
-function RunningNow({ selected }: { selected?: number }) {
-  const q = useQuery<AgentRunPage>("agents-running", (a) => a.agents.list({ state: "running" }));
-  const runs = q.data?.runs ?? [];
-  useNow(runs.length ? 1000 : undefined);
-  return (
-    <Block flush title={<>Running now {q.data && <span className="num ml-1 font-normal text-ink/50">{runs.length}</span>}</>} aside="live">
-      <ErrorLine error={q.error?.message} className="p-4" />
-      {q.data && runs.length === 0 && <p className="p-4 text-sm text-ink/55">No agent is running.</p>}
-      <ul>
-        {runs.map((r) => (
-          <li key={r.id} className={cn("relative border-t border-line px-4 py-2.5 first:border-t-0 hover:bg-ink/[0.03]", selected === r.id && "bg-accent/10")}>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <Link to={`/agents/${r.id}`} aria-current={selected === r.id} className="code text-sm font-medium after:absolute after:inset-0">
-                {r.step}
-              </Link>
-              <span className="text-xs text-ink/50">stage {r.stage}</span>
-              <Badge tone="accent">{r.model}</Badge>
-              <span className="text-xs text-ink/70">{who(r)}</span>
-              <span className="num ml-auto text-xs text-ink/70">
-                {elapsed(r)} · {tokensOf(r) === null ? "–" : `${num(tokensOf(r)!)} tok`}
-              </span>
-            </div>
-            <div className="mt-1">
-              <Items r={r} />
-            </div>
-            {r.progress && <p className="mt-1 text-xs text-ink/45 [overflow-wrap:anywhere]">{r.progress}</p>}
-          </li>
-        ))}
-      </ul>
-    </Block>
-  );
+/** `state` in the URL: one part of the list, or the finished calls that failed. */
+type StateFilter = "running" | "waiting" | "finished" | "failed";
+const STATES: { value: StateFilter; label: string }[] = [
+  { value: "running", label: "Running" },
+  { value: "waiting", label: "Waiting" },
+  { value: "finished", label: "Finished" },
+  { value: "failed", label: "Failed" },
+];
+
+type Filters = { runner?: string; person?: string; repo?: string; step?: string; state?: StateFilter; refused: boolean; window?: RefusalWindow };
+
+/** The page's filters as the URL holds them; runner, person and refused calls are for operators and maintainers. */
+function useFilters(staff: boolean): Filters & { update: (p: Record<string, string | null>) => void } {
+  const { state: f, update } = useUrlState();
+  const state = STATES.some((s) => s.value === f.state) ? (f.state as StateFilter) : undefined;
+  const refused = staff && f.refused === "1";
+  return {
+    ...(staff && f.runner && { runner: f.runner }), ...(staff && f.person && { person: f.person }), ...(f.repo && { repo: f.repo }), ...(f.step && { step: f.step }),
+    ...(state && { state }), refused, ...(refused && { window: (f.window as RefusalWindow | undefined) ?? "7d" }), update,
+  };
 }
 
-// ---- recent runs ---------------------------------------------------------------
+/** A value in the URL that the lists lack still shows as picked. */
+const options = (all: string, values: Iterable<string>, current: string | undefined): [string, string][] => {
+  const vs = [...new Set([...values, ...(current ? [current] : [])])].sort((a, b) => a.localeCompare(b));
+  return [["", all], ...vs.map((v): [string, string] => [v, v])];
+};
 
-function useRecent(filter: Omit<AgentRunFilter, "cursor">) {
-  const q = usePagedQuery(`agents-recent:${JSON.stringify(filter)}`, (api, cursor) => api.agents.list({ ...filter, cursor }), (p) => p.nextCursor);
-  return { rows: q.pages?.flatMap((p) => p.runs) ?? [], loading: q.loading || q.loadingMore, error: q.error?.message, more: q.hasMore, loadMore: q.loadMore };
+function FilterSelects({ f, seen, staff }: { f: ReturnType<typeof useFilters>; seen: { runners: string[]; people: string[]; steps: string[] }; staff: boolean }) {
+  const repos = useQuery("agents-repos", (a) => a.repos());
+  const set = (key: string) => (v: string) => f.update({ [key]: v || null });
+  return (
+    <>
+      {staff && <QuickSelect label={t("Task Runner")} prefix value={f.runner ?? ""} onChange={set("runner")} options={options(t("Any Task Runner"), seen.runners, f.runner)} />}
+      {staff && <QuickSelect label={t("Person")} prefix value={f.person ?? ""} onChange={set("person")} options={options(t("Anyone"), seen.people, f.person)} />}
+      <QuickSelect label={t("Repository")} value={f.repo ?? ""} onChange={set("repo")} options={options(t("All repositories"), repos.data ?? [], f.repo)} />
+      <QuickSelect label={t("Step")} prefix value={f.step ?? ""} onChange={set("step")} options={options(t("Any step"), seen.steps, f.step)} />
+    </>
+  );
 }
 
 const WINDOWS: RefusalWindow[] = ["24h", "7d", "30d"];
 const WINDOW_LABEL: Record<RefusalWindow, string> = { "24h": "24 hours", "7d": "7 days", "30d": "30 days" };
-
-function Filters({ f, update, staff }: { f: Record<string, string | undefined>; update: (p: Record<string, string | null>) => void; staff: boolean }) {
-  const steps = useQuery("agents-steps", (a) => a.pipeline.overview());
-  const repos = useQuery("agents-repos", (a) => a.repos());
-  const sel = (label: string, key: string, opts: { value: string; label: string }[]) => (
-    <label className="flex items-center gap-1.5 text-xs text-ink/60">
-      <span className="max-md:sr-only">{label}</span>
-      <select aria-label={label} value={f[key] ?? ""} onChange={(e) => update({ [key]: e.target.value || null })} className={cn(selectCls, "max-md:max-w-[44vw]")}>
-        <option value="">{`All ${label.toLowerCase()}s`}</option>
-        {opts.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-  return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-2">
-      {sel("Step", "step", (steps.data?.steps ?? []).filter((s) => ["classify-new", "classify-all", "areas-rescan"].includes(s.name)).map((s) => ({ value: s.name, label: s.name })).concat([{ value: "opus-review", label: "opus-review" }]).filter((o, i, a) => a.findIndex((x) => x.value === o.value) === i))}
-      {sel("State", "state", [{ value: "done", label: "Done" }, { value: "failed", label: "Failed" }])}
-      {sel("Repo", "repo", (repos.data ?? []).map((r) => ({ value: r, label: r })))}
-      {staff && (
-        <Chip active={f.refused === "1"} onClick={() => update({ refused: f.refused === "1" ? null : "1", window: null })} className="max-md:h-11">
-          {t("Refused")}
-        </Chip>
-      )}
-      {staff && f.refused === "1" && (
-        <Segmented
-          label={t("Time range")}
-          value={(f.window as RefusalWindow | undefined) ?? "7d"}
-          options={WINDOWS.map((w) => ({ value: w, label: t(WINDOW_LABEL[w]) }))}
-          onChange={(w) => update({ window: w === "7d" ? null : w })}
-        />
-      )}
-    </div>
-  );
-}
 
 // ---- refused calls -------------------------------------------------------------
 
@@ -213,82 +184,102 @@ function RetryOutcome({ refusal }: { refusal: AgentRunRefusal }) {
   );
 }
 
-function RecentRuns({ selected }: { selected?: number }) {
-  const { state: f, update } = useUrlState();
-  const staff = can(useUser(), "staff");
-  const refused = staff && f.refused === "1";
-  const window = refused ? ((f.window as RefusalWindow | undefined) ?? "7d") : undefined;
-  const recent = useRecent({ state: (f.state as AgentRunState | undefined) ?? "recent", step: f.step, repo: f.repo, limit: 50, ...(refused && { refused, window }) });
-  // A run open in the detail panel leaves the list narrow; the panel shows its model, Task Runner and tokens, so the list drops them for the items.
-  const open = selected !== undefined;
-  useNow(recent.rows.some((r) => r.state === "running") ? 1000 : undefined);
+// ---- the three parts ---------------------------------------------------------
+
+/** A run's row: its step links to the detail panel; its items, and the other controls, sit above that link. */
+function RunRow({ r, selected, children, meta }: { r: AgentRun; selected: boolean; children?: ReactNode; meta: ReactNode }) {
   return (
-    <Block flush title="Recent runs" aside="newest first">
-      <Filters f={f} update={update} staff={staff} />
-      {window && <RefusalCounts window={window} />}
-      <ErrorLine error={recent.error} className="p-4" />
-      <div className="overflow-x-auto">
-        <table className="num w-full text-sm">
-          <thead className="bg-ink/[0.03] text-xs text-ink/55">
-            <tr>
-              <th className="h-8 px-3 text-left font-medium max-md:hidden">Started</th>
-              <th className="h-8 px-3 text-left font-medium">Step</th>
-              {!refused && !open && <th className="h-8 px-3 text-left font-medium max-md:hidden">Model</th>}
-              {!open && <th className="h-8 px-3 text-left font-medium max-md:hidden">Task Runner</th>}
-              {refused && <th className="h-8 px-3 text-left font-medium max-md:hidden">{t("Retry")}</th>}
-              <th className="h-8 px-3 text-left font-medium">Items</th>
-              {!refused && !open && <th className="h-8 px-3 text-right font-medium max-md:hidden">Tokens</th>}
-              {!refused && <th className="h-8 px-3 text-left font-medium max-md:hidden">State</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {recent.rows.map((r) => (
-              <tr key={r.id} className={cn("relative border-t border-line hover:bg-ink/[0.03]", selected === r.id && "bg-accent/10")}>
-                <td className="relative z-10 whitespace-nowrap px-3 py-1.5 text-ink/70 max-md:hidden" title={r.startedAt}>
-                  <TimeAgo iso={r.startedAt} />
-                </td>
-                <td className="whitespace-nowrap px-3 py-1.5 code text-xs">
-                  <Link to={`/agents/${r.id}${location.search}`} className="after:absolute after:inset-0">
-                    {r.step}
-                  </Link>
-                  {/* Phones: the state and start time under the step, so the items get the width. */}
-                  <div className="mt-0.5 flex items-center gap-1.5 font-sans text-ink/60 md:hidden">
-                    <span className={cn("inline-block size-2 rounded-full", r.state === "failed" ? "bg-bad" : r.state === "running" ? "bg-accent" : "bg-ok")} role="img" aria-label={STATE_LABEL[r.state]} />
-                    <TimeAgo iso={r.startedAt} />
-                  </div>
-                  {refused && r.refusal && (
-                    <div className="mt-0.5 flex items-center gap-1 font-sans text-ink/55 md:hidden">
-                      {t("Retry")} <RetryOutcome refusal={r.refusal} />
-                    </div>
-                  )}
-                </td>
-                {!refused && !open && <td className="px-3 max-md:hidden">{r.model}</td>}
-                {!open && <td className="whitespace-nowrap px-3 text-ink/70 max-md:hidden">{r.provider === "jev" ? "–" : r.via ? <RemoteVia via={r.via} compact /> : "–"}</td>}
-                {refused && <td className="whitespace-nowrap px-3 max-md:hidden">{r.refusal && <RetryOutcome refusal={r.refusal} />}</td>}
-                <td className="px-3 md:min-w-60">
-                  <Items r={r} max={2} />
-                </td>
-                {!refused && !open && <td className="px-3 text-right max-md:hidden">{tokensOf(r) === null ? "–" : num(tokensOf(r)!)}</td>}
-                {!refused && (
-                  <td className="px-3 max-md:hidden">
-                    <Badge tone={STATE_TONE[r.state]}>{STATE_LABEL[r.state]}</Badge>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <li className={cn("relative border-t border-line px-4 py-2.5 first:border-t-0 hover:bg-ink/[0.03]", selected && "bg-accent/10")}>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {r.state !== "running" && <Badge tone={STATE_TONE[r.state]}>{t(STATE_LABEL[r.state])}</Badge>}
+        <Link to={`/agents/${r.id}${location.search}`} aria-current={selected || undefined} className="code text-sm font-medium after:absolute after:inset-0">
+          {r.step}
+        </Link>
+        <Badge tone="accent">{r.model}</Badge>
+        <span className="relative z-10 min-w-0">{who(r, true)}</span>
+        <span className="num relative z-10 ml-auto text-xs text-ink/70">{meta}</span>
       </div>
-      {!recent.loading && recent.rows.length === 0 && <p className="p-4 text-sm text-ink/55">{refused ? t("No refused runs in this range.") : "No runs match."}</p>}
+      <div className="mt-1">
+        <Items r={r} max={2} />
+      </div>
+      {children}
+    </li>
+  );
+}
+
+function Running({ rows, error, loaded, selected }: { rows: AgentRun[]; error?: string; loaded: boolean; selected?: number }) {
+  useNow(rows.length ? 1000 : undefined);
+  return (
+    <Block flush title={<>{t("Running")} {loaded && <span className="num ml-1 font-normal text-ink/50">{rows.length}</span>}</>}>
+      <ErrorLine error={error} className="p-4" />
+      {loaded && rows.length === 0 && <EmptyState>{t("No agent is running.")}</EmptyState>}
+      <ul>
+        {rows.map((r) => (
+          <RunRow key={r.id} r={r} selected={selected === r.id} meta={<>{elapsed(r)} · {tokensOf(r) === null ? "–" : t("{n} tok", { n: num(tokensOf(r)!) })}</>}>
+            {r.progress && <p className="mt-1 text-xs text-ink/55 [overflow-wrap:anywhere]">{r.progress}</p>}
+          </RunRow>
+        ))}
+      </ul>
+    </Block>
+  );
+}
+
+function Waiting({ q, user }: { q: { data?: ModelQueue; error?: { message: string } }; user: ViewProps["user"] }) {
+  const api = useApi();
+  const write = useWrite();
+  // Waits keep counting between refetches, from the moment this reply arrived.
+  const base = useMemo(() => nowMs(), [q.data]);
+  const now = useNow(q.data?.calls.length ? 30_000 : undefined);
+  const d = q.data;
+  return (
+    <Block
+      flush
+      title={<>{t("Waiting")} {d && <span className="num ml-1 font-normal text-ink/50">{d.calls.length}</span>}</>}
+      aside={d && user.role !== "viewer" && (d.me.canPick || d.me.picks > 0) ? <span className="num">{t("My picks {n}/{max}", { n: d.me.picks, max: d.me.pickMax })}</span> : undefined}
+    >
+      <ErrorLine error={q.error?.message ?? write.error} className="px-4 pt-3" />
+      {d && !d.calls.length && <EmptyState>{t("No model call is waiting.")}</EmptyState>}
+      <ul>
+        {d?.calls.map((c) => (
+          <QueuedCallRow key={c.id} c={c} user={user} waited={c.waitedMs + Math.max(0, now - base)} busy={write.busy}
+            onPick={() => void write.run(`pick:${c.id}`, () => api.modelQueue.pick(c.id))} onUnpick={() => void write.run(`unpick:${c.id}`, () => api.modelQueue.unpick(c.id))} />
+        ))}
+      </ul>
+    </Block>
+  );
+}
+
+function Finished({ f, recent, selected }: { f: Filters; recent: ReturnType<typeof useRecent>; selected?: number }) {
+  return (
+    <Block flush title={t("Finished")} aside={t("newest first")}>
+      {f.window && <RefusalCounts window={f.window} />}
+      <ErrorLine error={recent.error} className="p-4" />
+      <ul>
+        {recent.rows.map((r) => (
+          <RunRow key={r.id} r={r} selected={selected === r.id} meta={<>{formatCost(r.costUsd) ?? "–"} · {t("took {time}", { time: elapsed(r) })} · <TimeAgo iso={r.endedAt ?? r.startedAt} /></>}>
+            {f.refused && r.refusal && (
+              <div className="relative z-10 mt-1 flex items-center gap-1.5 text-xs text-ink/60">
+                {t("Retry")} <RetryOutcome refusal={r.refusal} />
+              </div>
+            )}
+          </RunRow>
+        ))}
+      </ul>
+      {!recent.loading && recent.rows.length === 0 && <EmptyState>{f.refused ? t("No refused runs in this range.") : t("No runs match.")}</EmptyState>}
       {(recent.more || recent.loading) && (
         <div className="border-t border-line p-3">
-          <Button size="sm" loading={recent.loading} disabled={!recent.more} onClick={recent.loadMore} className="max-md:h-11">
-            Load more
+          <Button size="sm" loading={recent.loading} disabled={!recent.more} onClick={recent.loadMore}>
+            {t("Load more")}
           </Button>
         </div>
       )}
     </Block>
   );
+}
+
+function useRecent(filter: Omit<AgentRunFilter, "cursor">, on: boolean) {
+  const q = usePagedQuery(`agents-recent:${on ? JSON.stringify(filter) : "off"}`, (api, cursor) => (on ? api.agents.list({ ...filter, cursor }) : Promise.resolve({ runs: [], nextCursor: null })), (p) => p.nextCursor);
+  return { rows: q.pages?.flatMap((p) => p.runs) ?? [], loading: q.loading || q.loadingMore, error: q.error?.message, more: q.hasMore, loadMore: q.loadMore };
 }
 
 // ---- detail --------------------------------------------------------------------
@@ -404,14 +395,74 @@ export function DetailPanel({ params }: ViewProps) {
 
 // ---- page ----------------------------------------------------------------------
 
-export function AgentsView({ params }: ViewProps) {
+export function AgentsView({ params, user }: ViewProps) {
   const id = params.id ? Number(params.id) : undefined;
+  const staff = can(useUser(), "staff");
+  const f = useFilters(staff);
+  const [sheet, setSheet] = useState(false);
+  const filtersButton = useRef<HTMLButtonElement>(null);
+  const show = (part: "running" | "waiting" | "finished") => (f.refused ? part === "finished" : !f.state || f.state === part || (part === "finished" && f.state === "failed"));
+  const common = { ...(f.runner && { runner: f.runner }), ...(f.person && { person: f.person }), ...(f.repo && { repo: f.repo }), ...(f.step && { step: f.step }) };
+  const running = useQuery(`agents-running:${JSON.stringify(common)}`, (a) => a.agents.list({ state: "running", ...common, limit: 100 }), { enabled: show("running") });
+  const wf: ModelQueueFilter = common;
+  const waiting = useQuery(`model-queue:${JSON.stringify(wf)}`, (a) => a.modelQueue.get(wf), { enabled: show("waiting") });
+  const recent = useRecent({ state: f.state === "failed" ? "failed" : "finished", ...common, limit: 50, ...(f.refused && { refused: true, window: f.window }) }, show("finished"));
+  const mine = useQuery("runners", (a) => a.runners.list(), { enabled: staff });
+  const runs = [...(running.data?.runs ?? []), ...recent.rows];
+  // The filters offer what the lists have shown since the page opened, so narrowing one filter keeps the others' choices.
+  const seenRef = useRef({ runners: new Set<string>(), people: new Set<string>([user.login]), steps: new Set<string>() });
+  const add = (set: Set<string>, vs: (string | undefined)[]) => vs.forEach((v) => v && set.add(v));
+  add(seenRef.current.runners, [...(mine.data?.runners ?? []).map((r) => r.label ?? undefined), ...runs.map((r) => r.via?.runner)]);
+  add(seenRef.current.people, [...runs.map((r) => r.via?.login), ...(waiting.data?.calls ?? []).map((c) => c.picked?.login)]);
+  add(seenRef.current.steps, [...runs.map((r) => r.step), ...(waiting.data?.calls ?? []).map((c) => c.step)]);
+  const seen = { runners: [...seenRef.current.runners], people: [...seenRef.current.people], steps: [...seenRef.current.steps] };
+  const narrowed = [f.runner, f.person, f.repo, f.step].filter(Boolean).length;
+  const setState = (s: StateFilter | null) => f.update({ state: s, refused: null, window: null });
   return (
-    <Page title="Agents" sub="Model calls through the prompt registry">
-      <RunsQueueSwitch value="runs" />
+    <Page title={t("Agents")}>
+      <div className="mt-3 flex items-start gap-2">
+        <div className="-ml-4 flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1 pl-4 md:ml-0 md:flex-wrap md:pl-0" role="group" aria-label={t("State")}>
+          <Chip active={!f.state && !f.refused} onClick={() => setState(null)} className="shrink-0 max-md:h-11">{t("All")}</Chip>
+          {STATES.map((s) => (
+            <Chip key={s.value} active={f.state === s.value && !f.refused} onClick={() => setState(s.value)} className="shrink-0 max-md:h-11"
+              count={s.value === "running" && running.data && show("running") ? num(running.data.runs.length) : s.value === "waiting" && waiting.data && show("waiting") ? num(waiting.data.calls.length) : undefined}>
+              {t(s.label)}
+            </Chip>
+          ))}
+          {staff && (
+            <Chip active={f.refused} onClick={() => f.update({ refused: f.refused ? null : "1", window: null, state: null })} className="shrink-0 max-md:h-11">
+              {t("Refused")}
+            </Chip>
+          )}
+        </div>
+        <Button ref={filtersButton} icon={FunnelIcon} onClick={() => setSheet(true)} className="h-11 shrink-0 md:hidden" aria-haspopup="dialog">
+          {narrowed ? t("Filters ({n})", { n: narrowed }) : t("Filters")}
+        </Button>
+      </div>
+      <div className="mt-2 hidden flex-wrap gap-2 md:flex" role="group" aria-label={t("Filters")}>
+        <FilterSelects f={f} seen={seen} staff={staff} />
+      </div>
+      <Dialog open={sheet} onClose={() => setSheet(false)} title={t("Filters")} variant="side" returnFocusRef={filtersButton}>
+        <div className="flex flex-col gap-3">
+          <FilterSelects f={f} seen={seen} staff={staff} />
+        </div>
+        <Button variant="primary" className="mt-4 h-11 w-full" onClick={() => setSheet(false)}>
+          {t("Done")}
+        </Button>
+      </Dialog>
+      {f.refused && (
+        <Segmented
+          label={t("Time range")}
+          value={f.window ?? "7d"}
+          options={WINDOWS.map((w) => ({ value: w, label: t(WINDOW_LABEL[w]) }))}
+          onChange={(w) => f.update({ window: w === "7d" ? null : w })}
+          className="mt-3"
+        />
+      )}
       <div className="mt-4 space-y-4">
-        <RunningNow selected={id} />
-        <RecentRuns selected={id} />
+        {show("running") && <Running rows={running.data?.runs ?? []} error={running.error?.message} loaded={!!running.data} selected={id} />}
+        {show("waiting") && <Waiting q={waiting} user={user} />}
+        {show("finished") && <Finished f={f} recent={recent} selected={id} />}
       </div>
     </Page>
   );
@@ -423,22 +474,20 @@ export function PhoneAgents(props: ViewProps) {
   return (
     <>
       <AgentsView {...props} />
-      <Dialog.Root open={id !== null} onOpenChange={(o) => !o && nav(`/agents${location.search}`)}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
-          <Dialog.Content className="fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col rounded-t-lg border-t border-line bg-panel" aria-describedby={undefined}>
+      <Sheet.Root open={id !== null} onOpenChange={(o) => !o && nav(`/agents${location.search}`)}>
+        <Sheet.Portal>
+          <Sheet.Overlay className="fixed inset-0 z-40 bg-black/40" />
+          <Sheet.Content className="fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col rounded-t-lg border-t border-line bg-panel" aria-describedby={undefined}>
             <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-4">
-              <Dialog.Title className="num text-sm font-semibold">Run {id}</Dialog.Title>
-              <Dialog.Close aria-label="Close" className="ml-auto flex size-11 items-center justify-center text-ink/60">
+              <Sheet.Title className="num text-sm font-semibold">{t("Run {id}", { id: id ?? "" })}</Sheet.Title>
+              <Sheet.Close aria-label={t("Close")} className="ml-auto flex size-11 items-center justify-center text-ink/60">
                 <XIcon />
-              </Dialog.Close>
+              </Sheet.Close>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">{id !== null && <RunDetailBody id={id} />}</div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+          </Sheet.Content>
+        </Sheet.Portal>
+      </Sheet.Root>
     </>
   );
 }
-
-/** The model calls running now in a flowchart stage's steps (slot flow.panel). */

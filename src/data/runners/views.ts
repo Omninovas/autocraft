@@ -8,7 +8,7 @@ import { loadQueue } from "./calls-read.ts";
 import { manualOnlyExpr } from "./fragments.ts";
 import { runnerCredentials, runnerRowOf, STATUS_FRESH_MS } from "./helpers.ts";
 import { loadRunnerSnapshot } from "./runner-snapshot.ts";
-import type { LowerLogin, QueuedCall, ReadyRunner, RunnerHealth, RunnerRow, RunnerSnapshot, Tier } from "./types.ts";
+import type { LowerLogin, Machine, QueuedCall, ReadyRunner, RunnerHealth, RunnerRow, RunnerSnapshot, Tier } from "./types.ts";
 
 /**
  * The runners that may take calls now, one per credential, from a snapshot: live, fresh, ready, their login not cooling off. `tiersOf` gives
@@ -58,6 +58,23 @@ export async function loadRunnerBoard(db: Db, now: number, windowMs: number): Pr
     helpers: helpers.map(runnerRowOf).sort((a, b) => a.login.localeCompare(b.login) || a.tokenId - b.tokenId),
     private: new Set(kept.map((r) => r.login.toLowerCase())),
   };
+}
+
+/**
+ * Runner credentials by id, expired ones included (revoked ones are gone): owner, label, machine, and whether the owner keeps their runners
+ * private on the Live board. 2 statements, 1 RT.
+ */
+export async function loadRunnerNames(db: Db, ids: readonly number[]): Promise<Map<number, { login: string; label: string | null; machine: Machine | null; private: boolean }>> {
+  const out = new Map<number, { login: string; label: string | null; machine: Machine | null; private: boolean }>();
+  if (!ids.length) return out;
+  const q = queryDb(db);
+  const [rows, kept] = await db.together(() => Promise.all([
+    q.all(runnerCredentials(db, 0, false).where(kx.inList(db, "t.id", [...new Set(ids)], "bigint"))),
+    q.all(q.k.selectFrom("main.user_settings").select("login").where("key", "=", "runner_private").where("value", "=", "1")),
+  ]));
+  const hidden = new Set(kept.map((r) => r.login.toLowerCase()));
+  for (const r of rows.map(runnerRowOf)) out.set(r.tokenId, { login: r.login, label: r.label, machine: r.machine, private: hidden.has(r.login.toLowerCase()) });
+  return out;
 }
 
 /** The reads of the runner health checks. The thresholds are the caller's (scaled windows live in feature code). */

@@ -34,7 +34,7 @@ export async function openRuns(db: Db, starts: readonly RunStart[], scrub?: Scru
       job_id: s.jobId, step: s.step, stage: s.stage, prompt_id: s.promptId, prompt_version: s.promptVersion, provider: s.provider, model: s.model,
       items: JSON.stringify(s.items.slice(0, MAX_ITEM_REFS)), item_count: s.items.length, state: "running" as const, started_at: at,
       first_repo: repo, first_number: repo === null ? null : Math.min(...s.items.map((r) => r.number)),
-      user_login: s.remote?.userLogin ?? null, harness: s.remote?.harness ?? null, reported_model: s.remote?.reportedModel ?? null, call_id: s.remote?.callId ?? null,
+      user_login: s.remote?.userLogin ?? null, harness: s.remote?.harness ?? null, reported_model: s.remote?.reportedModel ?? null, call_id: s.remote?.callId ?? null, token_id: s.remote?.tokenId ?? null,
     };
   });
   const open = async (): Promise<number[]> => {

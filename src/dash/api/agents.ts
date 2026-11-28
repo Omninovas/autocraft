@@ -1,5 +1,5 @@
 // Agent runs and rates over JSON; everyone signed in reads. Refused runs and their counts are for operators and maintainers.
-import type { AgentRunFilter, AgentRunState, RefusalWindow } from "../../../web/src/api/types.ts";
+import type { AgentRunFilter, RefusalWindow } from "../../../web/src/api/types.ts";
 import { getRun, listRuns, rates as ratesOf, refusals as refusalsOf, RunQueryError } from "../../agents/runs.ts";
 import { HttpError } from "../server/util.ts";
 import type { Req } from "../types.ts";
@@ -30,17 +30,17 @@ function intParam(req: Req, name: string): number | undefined {
 export const list = async (db: Db, req: Req) => wrap(async () => {
   const q = (k: string) => req.query.get(k) || undefined;
   const f: AgentRunFilter = {
-    state: q("state") as AgentRunState | "recent" | undefined, step: q("step"), repo: q("repo"), cursor: q("cursor"), limit: intParam(req, "limit"),
+    state: q("state") as AgentRunFilter["state"], step: q("step"), repo: q("repo"), person: q("person"), runner: q("runner"), cursor: q("cursor"), limit: intParam(req, "limit"),
     refused: req.query.get("refused") === "1" || undefined, window: q("window") as RefusalWindow | undefined,
   };
-  return await listRuns(db, f, await hiddenRepos(db, req), canSeeInternals(req));
+  return await listRuns(db, f, await hiddenRepos(db, req), canSeeInternals(req), Date.now(), req.user.login);
 });
 
 // The prompt and output texts hold item and comment text verbatim: operators and maintainers only.
 export const detail = async (db: Db, req: Req) => wrap(async () => {
   if (!/^\d{1,15}$/.test(req.params.id ?? "")) throw new HttpError(400, "not a run id");
   const staff = canSeeInternals(req);
-  const run = await getRun(db, Number(req.params.id), { hidden: await hiddenRepos(db, req), texts: staff });
+  const run = await getRun(db, Number(req.params.id), { hidden: await hiddenRepos(db, req), texts: staff, reader: req.user.login });
   if (!staff) return run;
   return { ...run, transcripts: (await loadRunTranscripts(db, run.id)).map(summaryOf), ...(!(await transcriptsOn(db)) && { transcriptsOff: true }) };
 });

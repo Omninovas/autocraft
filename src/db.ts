@@ -463,6 +463,8 @@ const STATE_COLUMNS: [table: string, column: string, type: string][] = [
   // The lowest (repo, number) of a model call's items.
   ["agent_runs", "first_repo", "TEXT"],
   ["agent_runs", "first_number", "INTEGER"],
+  // The Task Runner credential whose lease ran the call (user-local mode), so the Agents page filters by runner.
+  ["agent_runs", "token_id", "INTEGER"],
   // A Task Runner's idle claim and machine, kept with its status row (copied from mcp_tokens).
   ["remote_helpers", "idle_claim_at", "INTEGER"],
   ["remote_helpers", "idle_tiers", "TEXT"],
@@ -486,6 +488,9 @@ const STATE_INDEXES = [
   // The calls that ended lately (the live board's workers), and a repo's newest calls (the activity feed of one repo).
   "CREATE INDEX IF NOT EXISTS main.agent_runs_ended ON agent_runs(ended_at)",
   "CREATE INDEX IF NOT EXISTS main.agent_runs_first ON agent_runs(first_repo, started_at)",
+  // One Task Runner's or one person's calls, newest first (the Agents page's runner and person filters).
+  "CREATE INDEX IF NOT EXISTS main.agent_runs_token ON agent_runs(token_id, id) WHERE token_id IS NOT NULL",
+  "CREATE INDEX IF NOT EXISTS main.agent_runs_login ON agent_runs(user_login, id) WHERE user_login IS NOT NULL",
   // The implementation a PR belongs to.
   "CREATE INDEX IF NOT EXISTS main.implementations_pr ON implementations(repo, pr_number) WHERE pr_number IS NOT NULL",
   // The implement workflows linked to a PR.

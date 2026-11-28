@@ -150,10 +150,15 @@ Operators and maintainers only (other readers get 404). The list shows every sca
 
 ### Agents (`/agents`, `/agents/<run>`)
 
-An agent run is one model call: one `claude -p` call or one Jev batch request, made through the prompt registry. The page has three parts.
+An agent run is one model call: one `claude -p` call or one Jev request, made through the prompt registry. The nav rail lists the page for everyone signed in. It is one list in three parts, each following the live topics with no refresh:
 
-- **Running now**: every active run, refreshed every 5 s while the tab is visible. Each shows step and stage, model, account label (Jev has no account), the items it works on as `repo#n` links with "+N more", elapsed time and tokens so far.
-- **Recent runs**: newest first, filtered on the server by step, account, state and repo, and read by keyset cursor ("Load more"); the page never shows a total. A run opens a detail panel (a bottom sheet on phones) with the rendered prompt (collapsible; its registry id and version link to the Prompts page), the output, the error, token counts and a link to the job. Prompt and output are kept for ten years; after that the panel says "Prompt text removed after ten years".
+- **Running**: every active run: step, model, who ran it (the person and their Task Runner's label; Jev has none), the items it works on as `ItemRef`s with "+N more", elapsed time, tokens so far and the latest progress line.
+- **Waiting**: every queued model call (`GET /api/model-queue`) with its step, tier and model, items, time waited, estimated cost and the line that says why it waits (the same rule as the item page, `src/remote/queue-view.ts`); maintainers and operators pick a call with Run on my Task Runner and see their picks of the most they may hold.
+- **Finished**: done and failed runs, newest first, read by keyset cursor ("Load more"; the page never shows a total), each with its outcome, step, model, who ran it, cost, duration and end time.
+
+State chips above the list show all three parts or one (`?state=running|waiting|finished|failed`); quick filters narrow every part: Task Runner (`runner`, a label), person (`person`, the login whose Task Runner ran the call), repo (`repo`) and step (`step`), so `/agents?person=mira&runner=desk-1&state=waiting` is one Task Runner's waiting work. A waiting call runs on no Task Runner yet: the Task Runner and person filters keep the calls picked by or bound to that person or that Task Runner's owners. Task Runner, person and who ran a call are for operators and maintainers; a run names another person's Task Runner unless that person keeps their runners private or the label is the machine's hostname. On phones the quick filters open in a side sheet from the Filters button. Each Task Runner row on the Connect page links to the page narrowed to it. `/model-queue` opens `/agents?state=waiting`.
+
+A run opens a detail panel (a bottom sheet on phones) with the rendered prompt (collapsible; its registry id and version link to the Prompts page), the output, the error, token counts and a link to the job. Prompt and output are kept for ten years; after that the panel says "Prompt text removed after ten years".
 - **Refused** (operators and maintainers; `?refused=1&window=24h|7d|30d`, 7 days by default): the runs a model's safety filter declined, whether the call's retry on another Task Runner or tier then succeeded or not. Above the list, the refused runs of the range are counted per prompt, repo (a run's first item), model as the harness reported it and Task Runner user, each with how many had no other Task Runner or tier to take the call, so a cause they share stands out. Each row shows what the retry came to (its state, linking to the retry's run, or "Not retried"); the detail panel says the same and shows the refusal text in the error. Refusals recorded before runs kept their remote call show no retry run.
 
 ### Build environments (`/envs`, `/envs/<task>`)
@@ -218,6 +223,7 @@ The pipeline runs Claude agents under the operator's own Claude account on the o
 | Make an MCP Connector token | operator or maintainer (audited); anyone lists and revokes their own |
 | Make an MCP Connector token that may send commands | operator or maintainer (audited); lasts 7 days |
 | Approve or deny a Task Runner's login; remove your own Task Runner | operator or maintainer (audited; operator-only audit rows) |
+| Rename a Task Runner (Connect page, the runner's row; 1 to 64 characters) | its owner, or an operator (audited as `runner-rename` with the old and new label; operator-only audit rows) |
 | Run on my Task Runner (pick a queued model call), Manual only | operator or maintainer; only on a call whose repos they have write permission on; operators clear anyone's pick |
 | Whitelist overrides, whitelist rule, settings | operator |
 | Access list, sessions, access-management audit rows | operator |

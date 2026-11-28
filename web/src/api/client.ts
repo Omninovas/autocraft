@@ -12,6 +12,7 @@ import type {
   MySettings,
   MySettingsChange,
   ModelQueue,
+  ModelQueueFilter,
   LoginScopes,
   PendingRunnerLogin,
   RunnersReply,
@@ -287,10 +288,12 @@ export interface Api {
     revoke(id: number): Promise<unknown>;
     /** Sets one of the user's runners' agent access and answering. */
     setScopes(id: number, scopes: LoginScopes): Promise<unknown>;
+    /** Renames one of the user's runners (operators: anyone's); 1 to 64 characters. */
+    rename(id: number, label: string): Promise<unknown>;
   };
   /** The queued model calls of the user-local inference mode; maintainers and operators pick calls for their own Task Runners. */
   modelQueue: {
-    get(): Promise<ModelQueue>;
+    get(filter?: ModelQueueFilter): Promise<ModelQueue>;
     pick(id: number): Promise<unknown>;
     /** The user's own pick; operators clear anyone's. */
     unpick(id: number): Promise<unknown>;

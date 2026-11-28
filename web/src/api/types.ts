@@ -1326,8 +1326,11 @@ export type AgentRun = {
  * nothing else could take it. `retry`: the call's last later run, null while none ran or for refusals recorded before runs kept their call.
  */
 export type AgentRunRefusal = { outcome: "retried" | "failed"; retry: { id: number; state: AgentRunState } | null };
-/** A model call run by a user's helper: their login, the harness (claude, codex) and the model it reported. */
-export type RemoteVia = { login: string; harness: string; model: string };
+/**
+ * A model call run by a user's helper: their login, the harness (claude, codex) and the model it reported. `runner`: the Task Runner's
+ * label, absent when the reader may not see it (another person's private runner, a label that is the machine's hostname).
+ */
+export type RemoteVia = { login: string; harness: string; model: string; runner?: string };
 export type AgentRunDetail = AgentRun & {
   prompt: string | null;     // rendered prompt; null once past retention (ten years)
   output: string | null;     // raw model output, same retention
@@ -1379,8 +1382,11 @@ export type AgentRunTool = {
   check: { id: number; command: string; crate: string | null; testName: string | null; outcome: string | null } | null;
 };
 export type AgentRunPage = { runs: AgentRun[]; nextCursor: string | null };
-/** `refused` and `window` (runs started in the last 24 hours, 7 days or 30 days) are for operators and maintainers. */
-export type AgentRunFilter = { state?: AgentRunState | "recent"; step?: string; repo?: string; cursor?: string; limit?: number; refused?: boolean; window?: RefusalWindow };
+/**
+ * `finished`: done or failed; `recent`: every state. `person` (the login whose Task Runner ran the call), `runner` (a Task Runner's label),
+ * `refused` and `window` (runs started in the last 24 hours, 7 days or 30 days) are for operators and maintainers.
+ */
+export type AgentRunFilter = { state?: AgentRunState | "finished" | "recent"; step?: string; repo?: string; person?: string; runner?: string; cursor?: string; limit?: number; refused?: boolean; window?: RefusalWindow };
 export type RefusalWindow = "24h" | "7d" | "30d";
 /** Refused runs in a time range per prompt, repo (a run's first item), model and Task Runner user; `failed`: those nothing else could take. `key` null: none (no item, no user). */
 export type RefusalGroup = { key: string | null; n: number; failed: number };
@@ -2229,7 +2235,8 @@ export type ModelQueueWhyCode = "picked" | "session" | "bound" | "bound-off" | "
 export interface ModelQueueCall {
   id: number;
   items: (ItemRef & ItemShown)[];
-  /** The step's title. */
+  /** The runner step's name, and its title. */
+  step: string;
   kind: string;
   tier: InferenceTier;
   model: string;
@@ -2247,6 +2254,9 @@ export interface ModelQueueCall {
   /** Maintainers and operators: the last attempt's error, when it had one. */
   lastError?: string;
 }
+
+/** GET /api/model-queue narrowed: `person` and `runner` (a Task Runner's label: its owners) keep the calls picked by or bound to them; staff only. */
+export type ModelQueueFilter = { repo?: string; step?: string; person?: string; runner?: string };
 
 /** GET /api/model-queue. `runners`: fresh ready runners taking calls on their own and Manual only ones (`manualLogins` for maintainers and operators). `me.picks` of `me.pickMax`: the user's live picks and the most they may hold. */
 export interface ModelQueue {

@@ -3,6 +3,7 @@
 // sorts and pages. People who may send commands tick items to fill the command box with the list form (`merge:` then one item
 // per line) and run it for all of them at once.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { QuickSelect } from "../../../ui/molecules/QuickSelect";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChatCircleIcon, CheckCircleIcon, CircleDashedIcon, DiscordLogoIcon, FunnelIcon, GitPullRequestIcon, RadioButtonIcon, TerminalIcon, XCircleIcon } from "@phosphor-icons/react";
 import { t } from "../../../../../src/i18n/index.ts";
@@ -17,7 +18,6 @@ import { Badge, type Tone } from "../../../ui/atoms/Badge";
 import { Button } from "../../../ui/atoms/Button";
 import { Chip } from "../../../ui/atoms/Chip";
 import { Pending } from "../../../ui/atoms/Pending";
-import { Select } from "../../../ui/atoms/Select";
 import { Textarea } from "../../../ui/atoms/Textarea";
 import { TimeAgo } from "../../../ui/atoms/TimeAgo";
 import { Dialog } from "../../../ui/molecules/Dialog";
@@ -183,19 +183,6 @@ function Row({ r, opened, picking, picked, may, onPick }: { r: BrowseRow; opened
         <Meta r={r} />
       </div>
     </li>
-  );
-}
-
-/** One quick filter: a select over the values of one qualifier; the empty value removes it. With `prefix` a value reads "Label: bug". */
-function QuickSelect({ label, value, options, onChange, prefix }: { label: string; value: string; options: [string, string][]; onChange: (v: string) => void; prefix?: boolean }) {
-  return (
-    <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className="w-full md:w-auto md:max-w-[13rem]">
-      {options.map(([v, l]) => (
-        <option key={v} value={v}>
-          {prefix && v ? t("{label}: {value}", { label, value: l }) : l}
-        </option>
-      ))}
-    </Select>
   );
 }
 

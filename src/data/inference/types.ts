@@ -29,8 +29,8 @@ export type RunStart = {
   items: ItemRef[];
   /** The prompt text (stored scrubbed: `openRun` then needs the caller's `scrub`), or the stored form `packPrompt` made of it. */
   prompt: string | Uint8Array;
-  /** A call a Task Runner leased: the remote call, its user, harness and the model the claim named. */
-  remote?: { callId: number; userLogin: string; harness: string; reportedModel: string };
+  /** A call a Task Runner leased: the remote call, its user, the runner's credential, harness and the model the claim named. */
+  remote?: { callId: number; userLogin: string; tokenId: number; harness: string; reportedModel: string };
 };
 export type RunEnd = {
   id: number; state: Exclude<AgentRunState, "running"> | "cancelled";
@@ -51,6 +51,8 @@ export type RunRow = {
   tokens: { input: number | null; output: number | null; cacheRead: number | null; cacheWrite: number | null };
   costUsd: number | null; summary: string | null; error: string | null; progress: string | null;
   userLogin: string | null; harness: string | null; reportedModel: string | null;
+  /** The Task Runner credential whose lease ran it; null for local calls and runs from before it was kept. */
+  tokenId: number | null;
   callId: number | null; refusal: RunRefusal | null;
 };
 /** A call as the live board draws it. */

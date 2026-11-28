@@ -4,7 +4,6 @@ import { lazyView } from "../../registry/lazyView";
 const AgentsView = lazyView(() => import("./views"), "AgentsView");
 const DetailPanel = lazyView(() => import("./views"), "DetailPanel");
 const PhoneAgents = lazyView(() => import("./views"), "PhoneAgents");
-const ModelQueueView = lazyView(() => import("./queue"), "ModelQueueView");
 const TranscriptPage = lazyView(() => import("./transcript"), "TranscriptPage");
 
 export const agentsModule: FeatureModule = {
@@ -28,6 +27,5 @@ export const agentsModule: FeatureModule = {
       permission: "staff",
       view: { id: "agent-transcript", title: "Transcript", panels: [{ id: "main", title: "Transcript", component: TranscriptPage, defaultSize: 100 }] },
     },
-    { path: "model-queue", view: { id: "model-queue", title: "Model call queue", panels: [{ id: "main", title: "Model call queue", component: ModelQueueView, defaultSize: 100 }] } },
   ],
 };

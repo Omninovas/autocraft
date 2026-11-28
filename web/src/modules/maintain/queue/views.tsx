@@ -19,7 +19,7 @@ import { Pending } from "../../../ui/atoms/Pending";
 import { ItemRef } from "../../../ui/molecules/ItemRef";
 import { PENDING_STEP } from "../../queue/pendingStep";
 import { BATCH_STATE } from "../../queue/mergeParts";
-import { QueueRow as ModelCallRow } from "../../agents/queue";
+import { QueuedCallRow } from "../../../ui/organisms/QueuedCallRow";
 import { WarningIcon } from "@phosphor-icons/react";
 import { ConfirmButton } from "../../admin/parts";
 import { RecentlyMerged } from "../../queue/RecentlyMerged";
@@ -184,6 +184,7 @@ function HeldItems({ project, meta }: { project: string | null; meta: MaintainQu
 }
 
 function ModelCalls({ user }: { user: ViewProps["user"] }) {
+  const api = useApi();
   const q = useQuery<ModelQueue>("model-queue", (a) => a.modelQueue.get());
   const write = useWrite();
   const base = useMemo(() => nowMs(), [q.data]);
@@ -198,7 +199,8 @@ function ModelCalls({ user }: { user: ViewProps["user"] }) {
       {calls.length ? (
         <ul className="rounded-lg border border-line bg-panel">
           {calls.map((c) => (
-            <ModelCallRow key={c.id} c={c} user={user} waited={c.waitedMs + Math.max(0, now - base)} write={write} />
+            <QueuedCallRow key={c.id} c={c} user={user} waited={c.waitedMs + Math.max(0, now - base)} busy={write.busy}
+              onPick={() => void write.run(`pick:${c.id}`, () => api.modelQueue.pick(c.id))} onUnpick={() => void write.run(`unpick:${c.id}`, () => api.modelQueue.unpick(c.id))} />
           ))}
         </ul>
       ) : (

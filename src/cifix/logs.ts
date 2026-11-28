@@ -1,4 +1,4 @@
-// Reads why a head's CI failed. Read-only: two `gh` calls per failed run, no write wrapper. The text is the
+// Reads why a head's CI failed. Read-only: two `gh` calls per failed run, plus one per failed check of a run still in progress; no write wrapper. The text is the
 // PR's own CI output, so it is untrusted data wherever it goes next (a prompt frames it as such).
 import type { Gh } from "../merge/safe-merge.ts";
 import type { CiFailure, FailedCheck, FailedStep } from "./types.ts";
@@ -17,8 +17,9 @@ const ANSI = /(?:\u001b|\^\[)\[[0-9;?]*[A-Za-z]/g;
 const STAMP = /^\d{4}-\d\d-\d\dT[\d:.]+Z ?/;
 const GATE = /gate/i;
 
-type CheckRuns = { check_runs?: { name?: string; status?: string; conclusion?: string | null; details_url?: string | null; completed_at?: string | null }[] };
-type Run = { name: string; conclusion: string; runId: number | null; completedAt: string | null };
+type CheckRuns = { check_runs?: { id?: number; name?: string; status?: string; conclusion?: string | null; details_url?: string | null; completed_at?: string | null }[] };
+/** `checkId`: the check run's id, which for a GitHub Actions check is its job's id. */
+type Run = { name: string; conclusion: string; runId: number | null; checkId: number | null; completedAt: string | null };
 
 /**
  * The failed check runs of a head. The repos' CI calls the suite's gate workflow, so its checks carry "gate" in their
@@ -29,7 +30,7 @@ type Run = { name: string; conclusion: string; runId: number | null; completedAt
 export function failedRuns(reply: CheckRuns, optional: string[] = []): { runs: Run[]; gatePassed: boolean } {
   const all = reply.check_runs ?? [];
   const failed = all.filter((c) => c.status === "completed" && FAILED.has(c.conclusion ?? "") && !optional.includes(c.name ?? "?"))
-    .map((c) => ({ name: c.name ?? "?", conclusion: c.conclusion ?? "failure", runId: Number(/\/actions\/runs\/(\d+)/.exec(c.details_url ?? "")?.[1]) || null, completedAt: c.completed_at ?? null }));
+    .map((c) => ({ name: c.name ?? "?", conclusion: c.conclusion ?? "failure", runId: Number(/\/actions\/runs\/(\d+)/.exec(c.details_url ?? "")?.[1]) || null, checkId: c.id ?? null, completedAt: c.completed_at ?? null }));
   const gate = failed.filter((c) => GATE.test(c.name));
   const gatePassed = !gate.length && all.some((c) => GATE.test(c.name ?? ""));
   return { runs: gate.length ? gate : failed, gatePassed };
@@ -85,6 +86,21 @@ export function parseFailedLog(text: string): FailedStep[] {
 }
 
 /**
+ * A single job's raw log (`<timestamp> <text>` lines, steps opened by `##[group]Run ...`), as the jobs API serves it, cut to its
+ * failed step (failedPart) and that step's tail.
+ */
+export function parseJobLog(job: string, text: string): FailedStep[] {
+  const lines = text.replace(ANSI, "").replace(/^\uFEFF/, "").trimEnd().split("\n").map((l) => l.replace(/\r$/, "").replace(STAMP, ""));
+  const { step, lines: kept } = failedPart(lines);
+  const tail = kept.map((l) => `${l}\n`).join("");
+  return [{ job, step, tail: tail.length > STEP_TAIL ? tail.slice(-STEP_TAIL) : tail }];
+}
+
+/** `gh run view` refuses a run's log while the run goes on. */
+const IN_PROGRESS = /is still in progress/i;
+const firstLine = (e: unknown): string => String((e as Error).message ?? e).split("\n")[0]!.slice(0, 200);
+
+/**
  * `unread`: a failed run's log could not be read yet (the run still goes on, or GitHub has no log for it yet), so no CI fix try is made;
  * `failure` holds every failed check, those without a readable log with no steps.
  */
@@ -98,7 +114,8 @@ export async function readFailure(gh: Gh, repo: string, head: string, optional: 
   const { runs, gatePassed } = failedRuns(JSON.parse(await gh(["api", `repos/${slugOf(repo)}/commits/${head}/check-runs?per_page=100`])) as CheckRuns, optional);
   if (gatePassed) return { kind: "skip", why: "the gate checks passed; only an optional check failed" };
   if (!runs.length) return { kind: "skip", why: "no failed check run at the head (a commit status or a run waiting for approval failed)" };
-  const logs = new Map<number, FailedStep[]>();
+  // Per run: its failed steps, or "jobs" when the run goes on and each failed check's own job log is read instead.
+  const logs = new Map<number, FailedStep[] | "jobs">();
   const checks: FailedCheck[] = [];
   let total = 0;
   let unread: string | null = null;
@@ -106,18 +123,28 @@ export async function readFailure(gh: Gh, repo: string, head: string, optional: 
     let steps: FailedStep[] = [];
     if (r.runId !== null && r.conclusion === "failure") {
       if (!logs.has(r.runId)) {
-        // GitHub serves a run's log only once the whole run has ended, so a failed job of a run that goes on has none yet.
+        // GitHub serves a run's log only once the whole run has ended; a completed job's own log is served at once.
         try { logs.set(r.runId, parseFailedLog(await gh(["run", "view", String(r.runId), "--repo", `${slugOf(repo)}`, "--log-failed"]))); }
         catch (e) {
-          logs.set(r.runId, []);
-          unread ??= `the log of run ${r.runId} could not be read yet: ${String((e as Error).message ?? e).split("\n")[0]!.slice(0, 200)}`;
+          const why = firstLine(e);
+          if (IN_PROGRESS.test(why)) logs.set(r.runId, "jobs");
+          else { logs.set(r.runId, []); unread ??= `the log of run ${r.runId} could not be read yet: ${why}`; }
         }
       }
-      // A run holds several checks (jobs); a step belongs to the check whose name ends with its job's name.
       const all = logs.get(r.runId)!;
-      steps = all.filter((s) => r.name === s.job || r.name.endsWith(` / ${s.job}`));
-      if (!steps.length && runs.filter((x) => x.runId === r.runId).length === 1) steps = all;
-      if (!steps.length) unread ??= `the log of run ${r.runId} has no failed step of ${r.name} yet`;
+      if (all === "jobs") {
+        if (r.checkId === null) unread ??= `the log of run ${r.runId} could not be read yet: it is still in progress and ${r.name} names no job`;
+        else {
+          // `gh api` refuses output with terminal escape sequences unless told to pass them; parseJobLog strips them.
+          try { steps = parseJobLog(r.name, await gh(["api", `repos/${slugOf(repo)}/actions/jobs/${r.checkId}/logs`, "--allow-escape-sequences"])); }
+          catch (e) { unread ??= `the log of job ${r.checkId} of run ${r.runId} could not be read yet: ${firstLine(e)}`; }
+        }
+      } else {
+        // A run holds several checks (jobs); a step belongs to the check whose name ends with its job's name.
+        steps = all.filter((s) => r.name === s.job || r.name.endsWith(` / ${s.job}`));
+        if (!steps.length && runs.filter((x) => x.runId === r.runId).length === 1) steps = all;
+        if (!steps.length) unread ??= `the log of run ${r.runId} has no failed step of ${r.name} yet`;
+      }
     }
     const kept: FailedStep[] = [];
     let size = 0;

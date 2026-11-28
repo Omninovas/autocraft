@@ -8,7 +8,7 @@ import { setCommentApproval } from "../src/act/approval.ts";
 import { storeArtifact, tempPath } from "../src/build/artifacts.ts";
 import { FORMAT_ARTIFACT, gitFormatDiff, runCifix, type CifixDeps } from "../src/cifix/index.ts";
 import { formattingOnly, guardPatch } from "../src/cifix/guard.ts";
-import { parseFailedLog } from "../src/cifix/logs.ts";
+import { parseFailedLog, readFailure } from "../src/cifix/logs.ts";
 import { triage, unrelatedTests } from "../src/cifix/triage.ts";
 import type { CifixPr, CiFailure } from "../src/cifix/types.ts";
 import { REPO_PATH } from "../src/sandbox/command.ts";
@@ -125,6 +125,31 @@ describe("triage", () => {
     assert.equal(unrelatedTests(f, ["crates/ui/src/frame.rs"]), null);
     const built: CiFailure = { head: "h", checks: [{ name: job, conclusion: "failure", runId: 1, steps: [{ ...steps[0]!, tail: `error[E0425]: cannot find value\n${steps[0]!.tail}` }] }] };
     assert.equal(unrelatedTests(built, ["crates/ui-egui/src/autosave_name.rs"]), null);
+  });
+
+  test("a failed job of a run still in progress is read from its own job log", async () => {
+    const checks = { check_runs: [
+      { id: 501, name: "ci / gate (linux)", status: "completed", conclusion: "failure", details_url: "https://github.com/o/r/actions/runs/9/job/501" },
+      { id: 502, name: "ci / gate (windows)", status: "in_progress", conclusion: null, details_url: "https://github.com/o/r/actions/runs/9/job/502" },
+    ] };
+    const raw = [
+      "\uFEFF2026-11-28T05:10:00.0000000Z ##[group]Run actions/checkout@v4", "2026-11-28T05:10:00.1000000Z with: x", "2026-11-28T05:10:00.2000000Z ##[endgroup]",
+      "2026-11-28T05:11:00.0000000Z ##[group]Run cargo test --workspace", "2026-11-28T05:11:00.1000000Z ##[endgroup]",
+      "2026-11-28T05:12:00.0000000Z \u001b[31merror[E0599]\u001b[0m: no method named `width` found", "2026-11-28T05:12:00.1000000Z ##[error]Process completed with exit code 101.",
+      "2026-11-28T05:12:01.0000000Z Post job cleanup.", "2026-11-28T05:12:01.1000000Z [command]/usr/bin/git config --local cleanup",
+    ].join("\r\n") + "\r\n";
+    const gh = async (args: string[]): Promise<string> => {
+      if (args[0] === "run") throw new Error("gh run view failed: run 9 is still in progress; logs will be available when it is complete");
+      if (args[1]!.includes("/check-runs")) return JSON.stringify(checks);
+      if (/^repos\/[^/]+\/r\/actions\/jobs\/501\/logs$/.test(args[1]!) && args.includes("--allow-escape-sequences")) return raw;
+      throw new Error(`unexpected gh ${args.join(" ")}`);
+    };
+    const r = await readFailure(gh, "r", "h");
+    assert.equal(r.kind, "failure");
+    const [check] = r.kind === "failure" ? r.failure.checks : [];
+    assert.equal(check?.steps.length, 1);
+    assert.equal(check!.steps[0]!.step, "cargo test --workspace");
+    assert.ok(check!.steps[0]!.tail.includes("error[E0599]: no method") && check!.steps[0]!.tail.trimEnd().endsWith("exit code 101.") && !check!.steps[0]!.tail.includes("cleanup"));
   });
 });
 

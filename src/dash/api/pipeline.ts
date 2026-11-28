@@ -15,7 +15,7 @@ import { mayResumeTrip, resumeStage, TripError } from "../../data/control/index.
 import { HttpError } from "../server/util.ts";
 import type { Req } from "../types.ts";
 import { blankIfHidden, hiddenRepos, visibleRepos } from "./visible.ts";
-import { isHiddenRepo, writeSetting, type HiddenRepos } from "../../data/control/index.ts";
+import { isHiddenRepo, type HiddenRepos } from "../../data/control/index.ts";
 import { loadPipelineOverview } from "../../data/views/pipeline.ts";
 import { loadQuiet } from "../../data/security/index.ts";
 import { canSeeInternals } from "./staff.ts";

@@ -23,7 +23,7 @@ import type { Params, Stop, StopCode } from "../core/codes.ts";
 import { byHand, conflictPath, decidePr, fixAllowed, fixupOf, isDraft as draftPr, mergeOwned, notStarted, premergeFix } from "../core/decide.ts";
 import { pushRefusal } from "../core/gates.ts";
 import { draftOf, loadPrFact, loadPrFacts } from "../core/facts.ts";
-import { chainsOwn, ciAt, neededReview, type HeadReview, type RecordedPush } from "../core/evidence.ts";
+import { askedParts, chainsOwn, ciAt, neededReview, type HeadReview, type RecordedPush } from "../core/evidence.ts";
 import { PREMERGE_MAX_TRIES } from "../core/rules.ts";
 import { mayPush } from "../core/may.ts";
 import { standingFor } from "../core/standing.ts";
@@ -54,7 +54,7 @@ import { permKey, standings, type Standing } from "../data/access/index.ts";
 import { githubIdentity } from "../github/identity.ts";
 import { addTurns } from "../data/conversations/index.ts";
 import {
-  addFixupRequests, addLegs, adoptLegs, endFixupRequests, listWorkflows, loadFixupRequests, loadLegPass, loadLegs, loadWorkflowFacts, moveFixupRequests, moveLegs,
+  addFixupRequests, addLegs, adoptLegs, endFixupRequests, listWorkflows, loadFixupRequests, loadLegPass, loadLegs, loadWorkflowFacts, moveFixupRequests, moveLegs, setFixupInstructions,
   type LegContext, type LegMove, type LegPass, type LegRow, type LegState, type WorkflowFact,
 } from "../data/workflow/index.ts";
 import type { Db } from "../db/index.ts";
@@ -159,6 +159,40 @@ export class PreapprovalRefused extends Error {
   readonly active: boolean;
   readonly draft: boolean;
   constructor(message: string, why: "active" | "draft" | null = null) { super(message); this.active = why === "active"; this.draft = why === "draft"; }
+}
+
+/**
+ * A person dropped plan parts (`titles`): the parts-only fix-up requests of the PR (src/core/evidence.ts askedParts) lose them, as the
+ * person's word wins over the fix-up AutoCraft asked for. A request left with no part is withdrawn, also one whose try is under way: what it
+ * made is not pushed, as its lint run takes no withdrawn request (src/fixup/select.ts). Its merge leg goes back to review at the head it was
+ * at, so the merge goes on there. A request with parts left keeps them; one whose try is under way applies as it is.
+ */
+export async function dropFixParts(db: Db, o: { repo: string; number: number; titles: readonly string[]; by: string }): Promise<void> {
+  const dropped = new Set(o.titles.map((x) => x.toLowerCase()));
+  if (!dropped.size) return;
+  const requests = (await loadFixupRequests(db, { refs: [{ repo: o.repo, number: o.number }], anyMaker: true })).filter((r) => r.state === "queued");
+  const tried = await loadOperatorFixResults(db, requests.map((r) => r.id));
+  const ends: { id: number; reason: string }[] = [], rewrites: { id: number; instructions: string }[] = [];
+  for (const r of requests) {
+    const parts = askedParts(r.instructions);
+    if (!parts) continue;
+    const left = parts.filter((p) => !dropped.has(p.title.toLowerCase()));
+    if (left.length === parts.length) continue;
+    if (!left.length) ends.push({ id: r.id, reason: `${o.by} dropped every part it fixes` });
+    else if (!tried.has(r.id)) {
+      const [first, ...lines] = r.instructions.split("\n");
+      rewrites.push({ id: r.id, instructions: [first, ...lines.filter((_l, i) => !dropped.has(parts[i]!.title.toLowerCase()))].join("\n") });
+    }
+  }
+  if (!ends.length && !rewrites.length) return;
+  await db.write(async () => {
+    await setFixupInstructions(db, rewrites);
+    const ended = new Set(await endFixupRequests(db, ends));
+    for (const leg of (await loadLegs(db, [{ repo: o.repo, number: o.number }], { activeOnly: true })).get(refOf(o.repo, o.number)) ?? []) {
+      if (leg.state !== "fixup" || leg.fix_id === null || !ended.has(leg.fix_id)) continue;
+      await move(db, leg, "review", { head: leg.from_head, line: `${o.by} dropped every part the fix-up of ${short(leg.from_head)} was to fix: it is withdrawn, and the merge goes on at ${short(leg.from_head)}.` });
+    }
+  });
 }
 
 /** A refusal that a moment may lift: GitHub has not answered yet on what the step needs. */

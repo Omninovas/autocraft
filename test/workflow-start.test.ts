@@ -278,22 +278,22 @@ test("an approved merge at a pre-merge defect goes on without a question once th
   assert.ok(leg.head === "theirs" && !["failed", "cancelled"].includes(leg.state as string), JSON.stringify(leg));
 });
 
-test("drop of a blocking pre-merge finding overrules it: the merge goes on with green CI and no new pre-merge review, while merge alone stays refused", async () => {
+test("drop of a blocking pre-merge finding overrules it and withdraws the fix-up AutoCraft asked for it: the merge goes on with green CI and no new pre-merge review", async () => {
   const w = await unstarted(false);
   await w.db.run(w.db.k.deleteFrom("main.premerge_reviews"));
   await run(w, "merge");
   await w.premerge(1, "defect", false);
   await w.premergeRoundsSpent(1);
   await settle(w);
-  const stopped = (await liveWorkflow(w.db, "app", 1))!;
-  assert.deepEqual([stopped.state, stopped.rec!.parts.fix], ["blocked", [1]], stopped.rec?.text ?? "");
-  assert.match(stopped.rec!.text, /write drop 1/);
-  assert.equal((await send(w, "merge")).outcome, "refused");
+  const fixing = (await liveWorkflow(w.db, "app", 1))!;
+  assert.deepEqual([fixing.state, fixing.rec, fixing.plan.filter((p) => p.premerge).map((p) => p.n)], ["running", null, [1]]);
+  assert.equal((await w.rows("SELECT id FROM operator_fixups WHERE state = 'queued'")).length, 1, "AutoCraft asked for the fix-up");
   const o = await send(w, "drop 1");
   assert.equal(o.outcome, "run", o.line);
   await settle(w);
   const wf = (await liveWorkflow(w.db, "app", 1))!;
   assert.deepEqual([wf.state, wf.blocker, wf.plan.find((p) => p.n === 1)?.state, wf.plan.find((p) => p.n === 1)?.droppedBy], ["running", null, "dropped", MAINT], JSON.stringify(wf.rec));
+  assert.deepEqual(await w.rows("SELECT id FROM operator_fixups WHERE state = 'queued'"), [], "the drop withdraws the fix-up");
   await mergesAsPerson(w);
   assert.equal((await w.rows("SELECT tries FROM premerge_reviews WHERE number = 1")).length, 1);
 });
@@ -306,6 +306,7 @@ test("a dropped pre-merge finding the review repeats after an accepted author pu
   await w.premergeRoundsSpent(1);
   await settle(w);
   assert.equal((await send(w, "drop 1")).outcome, "run");
+  assert.deepEqual(await w.rows("SELECT id FROM operator_fixups WHERE state = 'queued'"), []);
   await settle(w);
   // The author pushes; the round's review accepts the head, and its pre-merge review finds the same defect.
   await w.synced(1, "sha2");
@@ -313,9 +314,9 @@ test("a dropped pre-merge finding the review repeats after an accepted author pu
   await w.verified(1);
   await w.premerge(1, "defect", false);
   await settle(w);
-  const stopped = (await liveWorkflow(w.db, "app", 1))!;
-  const again = stopped.plan.filter((p) => p.premerge && p.state === "planned").map((p) => p.n);
-  assert.deepEqual([stopped.state, again.length, stopped.rec!.parts.fix], ["blocked", 1, again], stopped.rec?.text ?? "");
+  const fixing = (await liveWorkflow(w.db, "app", 1))!;
+  const again = fixing.plan.filter((p) => p.premerge && p.state === "planned").map((p) => p.n);
+  assert.deepEqual([fixing.state, again.length, fixing.rec], ["running", 1, null]);
   assert.equal((await send(w, `drop ${again[0]}`)).outcome, "run");
   await settle(w);
   assert.equal((await liveWorkflow(w.db, "app", 1))!.plan.find((p) => p.n === again[0])?.droppedAt, "sha2");

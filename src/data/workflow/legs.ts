@@ -288,6 +288,21 @@ export async function moveFixupRequests(db: Db, rows: FixupRequestMove[]): Promi
 }
 
 /** Compare-and-set update where `state = 'queued'`: ends the requests and audits each as `operator-fixup` with its reason. Returns the ids ended. */
+/** Rewrites the instructions of queued fix-up requests (parts a person dropped come out); returns the ids rewritten. */
+export async function setFixupInstructions(db: Db, rows: { id: number; instructions: string }[]): Promise<number[]> {
+  if (rows.length === 0) return [];
+  const q = queryDb(db);
+  const k = q.k as any;
+  return await db.write(async () => {
+    const done: number[] = [];
+    for (const r of rows) {
+      const got = await q.all(k.updateTable("main.operator_fixups").set({ instructions: r.instructions }).where("id", "=", r.id).where("state", "=", "queued").returning(["id"])) as { id: number }[];
+      if (got.length) done.push(r.id);
+    }
+    return done;
+  });
+}
+
 export async function endFixupRequests(db: Db, rows: { id: number; reason: string }[]): Promise<number[]> {
   if (rows.length === 0) return [];
   const q = queryDb(db);

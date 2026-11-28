@@ -29,7 +29,7 @@ import type { Exec } from "../fixup/git.ts";
 import { ownerOf, slugOf } from "../owners.ts";
 import { claimLevels } from "../remote/level.ts";
 import { actRefusal } from "../github/identity.ts";
-import { mirrorBehind } from "../preapproval/index.ts";
+import { dropFixParts, mirrorBehind } from "../preapproval/index.ts";
 import { settlesNow } from "../preapproval/permissions.ts";
 import * as fx from "./effects.ts";
 import { isOpenQuestion } from "./question.ts";
@@ -593,6 +593,8 @@ async function carryOut(c: fx.Ctx, r: Run, wf: ItemWorkflow | null, actor: Actor
   // A new weight also orders the queued calls of the item and of the PR that implements it.
   const weighed = patch.weight === undefined ? [] : [item, ...(live.kind === "issue" ? [await issuePr(live)] : [])].filter((x) => x !== null);
   const work = runs ? await fx.again(on, { again: r.again, plan: live.plan, fix: r.fix, merges: r.merges, says: o.says && r.approve, instruction: r.instruction }) : null;
+  // The PR whose fix-ups the dropped parts come out of (src/preapproval dropFixParts).
+  const dropOn = r.drop.length ? (on.item.kind === "pr" ? on.item : live.kind === "issue" ? await issuePr(live) : null) : null;
   if (r.drop.length) {
     // The head the parts are dropped at: a dropped pre-merge finding overrules the review only there and at the heads our own pushes make from it.
     const at = live.kind === "issue" ? (await issuePr(live))?.head ?? null : item.head;
@@ -642,6 +644,7 @@ async function carryOut(c: fx.Ctx, r: Run, wf: ItemWorkflow | null, actor: Actor
       if (r.retryPremerge && live.recHead !== null) await retryPremergeAt(db, [{ repo: on.item.repo, number: on.item.number, head: live.recHead }]);
       if (weighed.length) await setCallLevels(db, [...await claimLevels(db, weighed)].map(([ref, level]) => ({ ref, level })));
       await work?.write(live.id);
+      if (dropOn) await dropFixParts(db, { repo: dropOn.repo, number: dropOn.number, titles: live.plan.filter((p) => r.drop.includes(p.n)).map((p) => p.title), by });
       return live.id;
     },
   };

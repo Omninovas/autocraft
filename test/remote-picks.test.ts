@@ -68,7 +68,7 @@ describe("picks and Manual only", async () => {
   const yes = async () => true;
   const leased = async (login: string, extra: Partial<Claim> = {}, canWrite = yes) => (await claimCall(db, callers[login]!, claim(extra), canWrite)).lease?.id ?? null;
   const user = (login: string, role: Role = "maintainer") => ({ login, role, canWrite: yes, canRead: yes });
-  const req = (login: string, role: Role, extra: Partial<Req> = {}) => ({ user: user(login, role), params: {}, ...extra }) as unknown as Req;
+  const req = (login: string, role: Role, extra: Partial<Req> = {}) => ({ user: user(login, role), params: {}, query: new URLSearchParams(), ...extra }) as unknown as Req;
   const q = async (opts: { tier?: Tier; ageMs?: number; items?: { repo: string; number: number }[]; promptId?: string; forLogin?: string; boundSlot?: boolean; parentId?: number } = {}) => {
     const tier = opts.tier ?? "top", promptId = opts.promptId ?? "review.opus";
     const id = await enqueueCall(db, { promptId, promptVersion: "1", tier, effort: "medium", askedModel: tier === "top" ? "opus" : "haiku", items: opts.items ?? [{ repo: "photocraft", number: 2 }], level: 0, maxAttempts: 2,

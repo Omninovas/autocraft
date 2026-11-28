@@ -212,6 +212,26 @@ describe("fixup step", () => {
     assert.equal(w.asked[0]!.repo_dir, REPO_PATH);
   });
 
+  test("a PR diff over the cap is held without a checkout and trimmed to the named files with one", async () => {
+    const other = `diff --git a/src/other.rs b/src/other.rs\n--- a/src/other.rs\n+++ b/src/other.rs\n@@ -1 +1,4000 @@\n${Array.from({ length: 4000 }, (_, i) => `+fn z${i}() { /* padding */ }`).join("\n")}\n`;
+    const diff = hunk("src/lib.rs", "-fn a() {}\n+fn a() { }\n") + other;
+    const held = world({ diff });
+    await runFixup(await fresh(held.head), { repo: "app", dryRun: false }, () => {}, held.deps);
+    assert.equal(held.asked.length, 0);
+
+    const w = world({ diff });
+    w.deps.checkout = async () => "/checkout";
+    const db = await fresh(w.head);
+    await runFixup(db, { repo: "app", dryRun: false }, () => {}, w.deps);
+    assert.equal(w.asked.length, 1);
+    const shown = w.asked[0]!.diff;
+    assert.ok(shown.length < diff.length);
+    assert.match(shown, /^diff --git a\/src\/lib\.rs /m);
+    assert.doesNotMatch(shown, /^diff --git a\/src\/other\.rs /m);
+    assert.match(shown, /src\/other\.rs/);
+    assert.notEqual((await fixupRows(db))[0]!.state, "too-large");
+  });
+
   describe("a patch on a large file with a duplicated block", () => {
     const dup = (i: number) => (i >= 100 && i < 103) || (i >= 2500 && i < 2503) ? `dup ${i < 200 ? i - 100 : i - 2500}` : `fn f${i}() {}`;
     const lib = Array.from({ length: 3000 }, (_, i) => dup(i)).join("\n") + "\n";

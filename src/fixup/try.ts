@@ -12,6 +12,7 @@ import { cachedDiff } from "../review/diff.ts";
 import { REPO_PATH } from "../sandbox/command.ts";
 import { parseFixes } from "./candidates.ts";
 import { DIFF_CAP, FILE_CAP, TOTAL_CAP, defaultDeps, type FixupDeps } from "./index.ts";
+import { checkoutDiff } from "./diff-view.ts";
 import { shownSize, viewFile } from "./excerpt.ts";
 import { Git } from "./git.ts";
 import { buildScriptsAt, fixupEditable, validatePatch, type FixupPr } from "./patch.ts";
@@ -53,8 +54,9 @@ export async function runFixupTry(db: Db, repo: string, number: number, d: Fixup
   if (bad) throw new Error(`the fixes name ${bad}, which a fix-up may not edit`);
   const diff = await cachedDiff(db, repo, number, head, d.fetchDiff);
   if (!diff.ok) throw new Error(`no diff: ${diff.error}`);
-  if (diff.text.length > DIFF_CAP) throw new Error(`the PR diff is over the ${DIFF_CAP} character limit`);
   const checkout = (await d.checkout?.(repo, number, head)) ?? undefined;
+  if (!checkout && diff.text.length > DIFF_CAP) throw new Error(`the PR diff is over the ${DIFF_CAP} character limit`);
+  const modelDiff = checkout ? checkoutDiff(diff.text, new Set(files), DIFF_CAP) : diff.text;
   const repoDir = checkout ? { repo_dir: REPO_PATH } : {};
   const shown: FixupPr["files"] = [];
   let total = 0;
@@ -75,7 +77,7 @@ export async function runFixupTry(db: Db, repo: string, number: number, d: Fixup
   const base = (await d.querier.query(BASE_QUERY, { owner: ownerOf(repo), name: repo, n: number }) as { repository?: { pullRequest?: { baseRefOid?: string } | null } }).repository?.pullRequest?.baseRefOid ?? null;
   const tool = new CheckTool({ db, step: "fixup", repo, number, head, base, applies: applyCheck(git, d.root, head, (p) => refusal(validatePatch(p, files, (x) => fixupEditable(x, scripts)))) });
   const t0 = Date.now();
-  const reply = await d.ask(db, [{ ref, title: (item.title ?? "").slice(0, 300), fixes, files: shown, diff: diff.text, ...repoDir }], checkout, tool);
+  const reply = await d.ask(db, [{ ref, title: (item.title ?? "").slice(0, 300), fixes, files: shown, diff: modelDiff, ...repoDir }], checkout, tool);
   log(`model call took ${Math.round((Date.now() - t0) / 1000)} s`);
 
   const offered = checkout !== undefined && CLAUDE_PROMPTS["fixup.patch"].sandbox?.check === true;
@@ -97,7 +99,7 @@ export async function runFixupTry(db: Db, repo: string, number: number, d: Fixup
 
   let code = 0;
   if (v.patch.length > CHECK_PATCH_CAP) { log(`\nOpus check skipped: the patch is over the ${CHECK_PATCH_CAP} character limit`); return 1; }
-  const checkReply = await d.check(db, [{ ref, title: (item.title ?? "").slice(0, 300), review_reason: review.reason ?? "", fixes, diff: diff.text.slice(0, CHECK_DIFF_CAP), patch: v.patch, ...repoDir }], checkout);
+  const checkReply = await d.check(db, [{ ref, title: (item.title ?? "").slice(0, 300), review_reason: review.reason ?? "", fixes, diff: modelDiff.slice(0, CHECK_DIFF_CAP), patch: v.patch, ...repoDir }], checkout);
   const verdict = checkReply === null ? null : parseCheck(checkReply);
   if (!verdict) log("\nOpus check: no answer");
   else if (!verdict.ok) log(`\nOpus check: no valid answer: ${verdict.error}`);

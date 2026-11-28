@@ -119,7 +119,7 @@ export function createHttpApi(): Api {
       stats: (period) => get(`/api/maintain/stats${qs({ period })}`),
       items: (q) => get(`/api/maintain/items${qs({ ...q, filters: undefined, filter: q.filters?.join(","), areas: undefined, area: q.areas?.join(","), refs: q.refs?.join(",") })}`),
       browse: (q) => get(`/api/maintain/browse${qs({ ...q, refs: q.refs?.join(",") })}`),
-      command: (text, asked) => post("/api/commands", { text, asked }),
+      command: (text, opts) => post("/api/commands", { text, ...(opts?.items?.length ? { items: opts.items } : {}), asked: opts?.asked }),
       repos: () => get("/api/maintain/repos"),
       asked: () => get("/api/maintain/asked"),
       control: (input) => post("/api/controls", input),

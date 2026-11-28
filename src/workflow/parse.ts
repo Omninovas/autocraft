@@ -70,6 +70,17 @@ export function describe(parts: readonly CommandPart[], items: readonly ItemRef[
   return items.length ? (words ? `${words}: ${refs}` : refs) : words;
 }
 
+/** The list form: the command, a colon, then the items. A colon that starts `://` belongs to a URL. */
+const LIST_FORM = /^([^:\n]+?):(?!\/\/)([\s\S]*)$/;
+
+/** Text in the list form whose items all read (a bare number takes `repo`): the command words before the colon and the items; else null. */
+export function listForm(text: string, repo?: string): { words: string; items: ItemRef[] } | null {
+  const m = LIST_FORM.exec(text.trim());
+  if (!m) return null;
+  const read = readItems(m[2]!, repo);
+  return read.items.length && !read.bad.length ? { words: m[1]!.trim(), items: read.items } : null;
+}
+
 /** Reads text written to AutoCraft. */
 export function parse(text: string, opts: ParseOptions = {}): Parsed {
   let s = text.trim().replace(/[\u2018\u2019]/g, "'");
@@ -83,8 +94,7 @@ export function parse(text: string, opts: ParseOptions = {}): Parsed {
   s = said.text;
   const normal = normalise(s);
   s = normal.text;
-  // The list form: the command, a colon, then the items. A colon that starts `://` belongs to a URL.
-  const list = /^([^:\n]+?):(?!\/\/)([\s\S]*)$/.exec(s);
+  const list = LIST_FORM.exec(s);
   const head = list ? list[1]! : s;
   const inline = pullItems(head, opts.repo);
   const marked = pullItems(head, opts.repo, true);

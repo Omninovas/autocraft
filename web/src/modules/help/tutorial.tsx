@@ -69,7 +69,7 @@ function RunnerStep({ done }: { done?: boolean }) {
   const [harness, setHarness] = useState<Harness>(typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent) ? "mac" : "linux");
   const text = [`autocraft login ${location.origin}`, HARNESS[harness], "autocraft doctor", "autocraft service install"].join("\n");
   return (
-    <TutorialStep id="runner" n={2} title={t("Connect a Task Runner")} done={done} refs={[{ to: "/connect/setup", label: t("Setup guide") }, { to: "/runner", label: t("Runner page") }, { to: "/help/start", label: t("Getting started") }]}>
+    <TutorialStep id="runner" n={2} title={t("Connect a Task Runner")} done={done} refs={[{ to: "/connect/setup", label: t("Setup guide") }, { to: "/runner", label: t("Runner page") }, { to: "/help/start", label: t("Overview") }]}>
       <p>{t("Model work runs on Task Runners: maintainers' own machines, on their own Claude or Codex subscription. What you start and what you ask the model runs on yours.")}</p>
       <p>
         {t("Install the runner with the first command of the")}{" "}
@@ -79,7 +79,7 @@ function RunnerStep({ done }: { done?: boolean }) {
       <Segmented label={t("Model login")} value={harness} onChange={(v) => setHarness(v as Harness)} options={[{ value: "linux", label: t("Claude on Linux") }, { value: "mac", label: t("Claude on macOS") }, { value: "codex", label: "Codex" }]} />
       <CodeBlock compact title={t("Task Runner commands")} text={text} />
       <p>
-        <Code>autocraft login</Code> {t("prints a link with a code. Open it, approve the code, and name the runner there.")}{" "}
+        <Code>autocraft login</Code> {t("prints a link with a code. Open it and approve the code.")}{" "}
         <Code>autocraft work</Code> {t("runs it in a terminal instead of as a service.")}
       </p>
       <p>
@@ -95,6 +95,10 @@ function RunnerStep({ done }: { done?: boolean }) {
         <dt className="font-semibold">{t("Max calls at once")}</dt>
         <dd>{t("the most calls all your runners run together")}</dd>
       </dl>
+      <p>
+        {t("Open your runner's row on the")} <Link to="/connect" className={linkCls}>{t("Connect page")}</Link> {t("to rename it, set its access, or see its calls on the")}{" "}
+        <Link to="/agents" className={linkCls}>{t("Agents page")}</Link>.
+      </p>
       {done === false && <p className="text-sm text-ink/70">{t("Done when one of your Task Runners is connected and ready.")}</p>}
     </TutorialStep>
   );
@@ -103,7 +107,7 @@ function RunnerStep({ done }: { done?: boolean }) {
 function DiscordStep({ check }: { check?: SetupCheck }) {
   const [linking, setLinking] = useState(false);
   return (
-    <TutorialStep id="discord" n={3} title={t("Link Discord")} done={check?.done} refs={[{ to: "/help/start", label: t("Getting started") }]}>
+    <TutorialStep id="discord" n={3} title={t("Link Discord")} done={check?.done} refs={[{ to: "/help/start", label: t("Overview") }]}>
       <p>
         {t("Link your Discord account, so")} <Code>@AutoCraft</Code> {t("and")} <Code>/autocraft do</Code> {t("act as you. Link Discord shows a code; run the command it shows in Discord:")}
       </p>
@@ -198,7 +202,16 @@ function Commands({ mention }: { mention: string }) {
         <figcaption className="text-sm font-semibold">{t("In AutoCraft")}</figcaption>
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-2 rounded-md border border-line p-3">
-            <p className="text-sm text-ink/70">{t("Items: tick the rows, then type the words in front of the list.")}</p>
+            <p className="text-sm text-ink/70">{t("Items: tick the rows; the command box opens. Type only the words: each ticked item gets the command.")}</p>
+            <div className="flex flex-col gap-2 rounded-lg border border-line-strong bg-raised p-3">
+              <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                <span className="font-medium">{t("Command")}</span>
+                <span className="num text-ink/70">{t("{n} items selected", { n: ITEMS.length })}</span>
+              </p>
+              <p className="code rounded border border-line bg-sunken px-2 py-1.5 text-sm">{SAID}</p>
+              <span aria-hidden className="inline-flex h-8 w-fit items-center rounded border border-accent bg-accent px-3 text-sm font-medium text-white">{t("Run")}</span>
+              {many.map((l) => <p key={l} className="text-sm text-ink/80">{l}</p>)}
+            </div>
             <ul aria-label={t("Ticked items")} className="flex flex-col divide-y divide-line rounded border border-line">
               {ITEMS.map((i) => (
                 <li key={i.number} className="flex items-start gap-2 px-2 py-1.5 text-sm">
@@ -210,12 +223,6 @@ function Commands({ mention }: { mention: string }) {
                 </li>
               ))}
             </ul>
-            <div className="flex flex-col gap-2 rounded-lg border border-line-strong bg-raised p-3">
-              <p className="text-sm font-medium">{t("Command")}</p>
-              <pre className="code whitespace-pre-wrap rounded border border-line bg-sunken px-2 py-1.5 text-sm">{`${SAID}:\n${ITEMS.map((i) => ref(i.number)).join("\n")}`}</pre>
-              <span aria-hidden className="inline-flex h-8 w-fit items-center rounded border border-accent bg-accent px-3 text-sm font-medium text-white">{t("Run")}</span>
-              {many.map((l) => <p key={l} className="text-sm text-ink/80">{l}</p>)}
-            </div>
           </div>
           <div className="flex min-w-0 flex-col gap-2 rounded-md border border-line p-3">
             <p className="text-sm text-ink/70">{t("An item's page: type in its chat.")}</p>
@@ -272,8 +279,8 @@ function FollowStep() {
           <Link to="/queue" className={linkCls}>{t("Work queue")}</Link>: {t("what runs, what waits and why.")}
         </li>
         <li>
-          <Link to="/agents" className={linkCls}>{t("Agents")}</Link> {t("and the")} <Link to="/model-queue" className={linkCls}>{t("model call queue")}</Link>
-          {t(": every model call, and why a queued one waits, such as no Task Runner ready or all of them busy.")}
+          <Link to="/agents" className={linkCls}>{t("Agents")}</Link>
+          {t(", in the sidebar: the model calls that are running, waiting and finished. A waiting call says why, such as no Task Runner ready or all of them busy.")}
         </li>
         <li>{t("An item's page: the chat, and beside it the GitHub and Events tabs with everything that happened to the item.")}</li>
       </ul>

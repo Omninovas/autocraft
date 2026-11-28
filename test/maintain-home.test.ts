@@ -65,7 +65,7 @@ test("an item stopped at a blocker shows its recommendation and needs an answer 
   await db.run(db.k.insertInto("security_findings").values({
     repo: "app", number: 7, scan_id: 7, area: "a", title: "Path escape", severity: "high", urgent: 0, state: "landing", refs: "[]", reach: "r", impact: "i", fingerprint: "fp7", fix_pr: 2, created_at: T, updated_at: T,
   }));
-  const shown = (rows: { number: number; line: string | null }[]) => rows.map((r) => [r.number, r.line?.startsWith("Merge past the stop. Reply yes") ?? false]).sort();
+  const shown = (rows: { number: number; line: string | null }[]) => rows.map((r) => [r.number, r.line?.startsWith("Merge past the stop. Reply to go ahead") ?? false]).sort();
 
   const m = as("maintainer", ["app"]), v = as("viewer", []);
   assert.deepEqual(shown((await home(db, m)).mine), [[1, true], [2, true]]);

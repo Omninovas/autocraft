@@ -36,20 +36,22 @@ async function repo(): Promise<World> {
 }
 const command = async (w: World, text: string, number = 1) => (await runCommand(w.db, actor, "dashboard", { parsed: parse(text), items: [{ repo: "app", number }] })).items[0]!;
 const run = async (w: World, text: string, number = 1): Promise<void> => { const o = await command(w, text, number); assert.equal(o.outcome, "run", o.line); };
-const hold = (w: World, head: string) => w.db.run(w.db.k.insertInto("main.opus_reviews").values({
-  repo: "app", number: 1, head_oid: head, run_id: "rv", at: new Date().toISOString(), model: "m", mode: "full", verdict: "hold", sure: 1, reason: "r" }));
+/** Two failed fix-up tries at `head`: a step that failed twice, which stops an approved item. */
+const failedTwice = async (w: World, head: string) => {
+  for (const [state, attempt] of [["failed", 1], ["refused", 2]] as const) await w.db.run(w.db.k.insertInto("main.fixups").values({ repo: "app", number: 1, from_head: head, to_head: null, state, reason: null, files: "[]", attempt, created_at: new Date().toISOString(), source: "review" }));
+};
 const legs = async (w: World, number = 1) => await w.db.all(w.db.k.selectFrom("main.preapprovals").selectAll().where("number", "=", number).orderBy("id"));
 const ACTIVE = ["fixup", "review", "ci", "queued"];
 const activeLegs = async (w: World, number = 1) => (await legs(w, number)).filter((l) => ACTIVE.includes(l.state)).length;
 
-/** PR 1 started at Review with the merge approved and a merge leg, and a review that stops it. */
+/** PR 1 started at Review with the merge approved and a merge leg, and a failing step that stops it. */
 async function stopping(): Promise<World> {
   const w = await repo();
   await w.pr(1, { label: "feature" });
   await run(w, "review and merge");
   await advanceWorkflows(w.db);
   await pause();
-  await hold(w, "sha1");
+  await failedTwice(w, "sha1");
   return w;
 }
 
@@ -106,7 +108,7 @@ test("a pass that stops the item between the writes of a person's command loses 
     await advanceWorkflows(w.db);
     const history = await workflowHistory(w.db, "app", 1), last = history.at(-1)!;
     assert.deepEqual(history.map((x) => x.state), { urgent: ["blocked"], stop: ["stopped"], "stop, then review and merge": ["stopped", "running"] }[text], label);
-    if (text === "urgent") assert.deepEqual([last.weight, last.blocker], [10, "major-finding"], label);
+    if (text === "urgent") assert.deepEqual([last.weight, last.blocker], [10, "failed-twice"], label);
     assert.equal(await activeLegs(w), last.state === "running" ? 1 : 0, label);
     w.close();
   }

@@ -239,33 +239,21 @@ test("a merge nobody can make is refused with the reason, as an entry and on a s
   }
 });
 
-test("an approved merge stopped at a pre-merge defect while it had no fix-up round starts one on the next pass; one whose rounds are used stays stopped", async () => {
-  for (const used of [false, true]) {
-    const w = await unstarted(false);
-    await w.db.run(w.db.k.deleteFrom("main.premerge_reviews"));
-    await run(w, "merge");
-    await w.premerge(1, "defect", false);
-    // The stop is made while the rule gives the defect no round.
-    await w.premergeRoundsSpent(1);
-    await settle(w);
-    const stopped = (await liveWorkflow(w.db, "app", 1))!;
-    assert.deepEqual([stopped.state, stopped.blocker], ["blocked", "major-finding"], `used ${used}`);
-    // The rule gives it rounds now, or the PR is at the round limit.
-    await w.db.run(w.db.k.deleteFrom("main.fixups").where("source", "=", "premerge"));
-    if (used) await w.premergeRoundsSpent(1);
-    await settle(w);
-    const after = (await liveWorkflow(w.db, "app", 1))!;
-    const round = (await w.prPlan(1)).actions.some((a) => a.kind === "fixup" && a.params?.source === "premerge");
-    if (used) assert.deepEqual([after.state, after.blocker, after.recAt, round], ["blocked", "major-finding", stopped.recAt, false]);
-    else {
-      assert.deepEqual([after.state, after.blocker, after.rec, round], ["running", null, null, true], JSON.stringify(after.rec));
-      assert.equal((await w.rows("SELECT state FROM preapprovals WHERE number = 1 ORDER BY id DESC"))[0]!.state, "ci");
-    }
-    w.close();
-  }
+test("an approved merge at a pre-merge defect whose fix-up rounds are used gets a fix-up of the defects as the approver, with no question", async () => {
+  const w = await unstarted(false);
+  await w.db.run(w.db.k.deleteFrom("main.premerge_reviews"));
+  await run(w, "merge");
+  await w.premerge(1, "defect", false);
+  await w.premergeRoundsSpent(1);
+  await settle(w);
+  const wf = (await liveWorkflow(w.db, "app", 1))!;
+  assert.deepEqual([wf.state, wf.rec, wf.plan.filter((p) => p.premerge).map((p) => p.title)], ["running", null, ["off by one"]]);
+  const asked = await w.rows("SELECT by, instructions FROM operator_fixups WHERE state = 'queued'");
+  assert.ok(asked.length === 1 && asked[0]!.by === MAINT && /off by one/.test(String(asked[0]!.instructions)), JSON.stringify(asked));
+  w.close();
 });
 
-test("an approved merge stopped at a pre-merge defect goes on without a question once the author's fix passes the review round", async () => {
+test("an approved merge at a pre-merge defect goes on without a question once the author's fix passes the review round", async () => {
   const w = await unstarted(false);
   await w.db.run(w.db.k.deleteFrom("main.premerge_reviews"));
   await run(w, "review and merge");
@@ -274,8 +262,7 @@ test("an approved merge stopped at a pre-merge defect goes on without a question
   await w.premerge(1, "defect", false);
   await w.premergeRoundsSpent(1);
   await settle(w);
-  const stopped = (await liveWorkflow(w.db, "app", 1))!;
-  assert.deepEqual([stopped.state, stopped.blocker], ["blocked", "major-finding"]);
+  assert.deepEqual([(await liveWorkflow(w.db, "app", 1))!.state, (await liveWorkflow(w.db, "app", 1))!.rec], ["running", null]);
   // The author pushes their own fix; the review round finds the new commits within what was approved.
   await w.synced(1, "theirs");
   await settle(w);
@@ -335,26 +322,3 @@ test("a dropped pre-merge finding the review repeats after an accepted author pu
   await mergesAsPerson(w, "sha2");
 });
 
-test("merge at a stop on defects the pre-merge review gave no fix for is refused and asks to fix them first; the yes has them fixed", async () => {
-  const w = await unstarted(false);
-  await w.db.run(w.db.k.deleteFrom("main.premerge_reviews"));
-  await run(w, "merge");
-  await w.premerge(1, "defect", false);
-  await w.premergeRoundsSpent(1);
-  await settle(w);
-  const stopped = (await liveWorkflow(w.db, "app", 1))!;
-  assert.deepEqual([stopped.state, stopped.rec!.parts.fix, stopped.rec!.again], ["blocked", [1], undefined], stopped.rec?.text ?? "");
-  // A stop stored without its defects as parts gets them when someone says merge.
-  await updateWorkflow(w.db, stopped.id, { plan: [], blockerParams: { ...stopped.blockerParams, premerge: [] }, rec: { text: "Review it again, then merge.", parts: { fix: [], drop: [] }, merges: true, again: "review" } });
-  const o = await send(w, "merge");
-  assert.equal(o.outcome, "refused", o.line);
-  assert.match(o.line, /nothing merges past them.*Fix them first\?.*Reply yes to fix 1, then merge/);
-  const asked = (await liveWorkflow(w.db, "app", 1))!;
-  assert.deepEqual([asked.state, asked.rec!.parts.fix, asked.plan.map((p) => p.title), o.question?.recAt], ["blocked", [1], ["off by one"], asked.recAt]);
-  // Saying it again asks the same question again.
-  assert.match((await send(w, "merge")).line, /Reply yes to fix 1, then merge/);
-  await settle(w);
-  await run(w, "yes");
-  assert.equal((await liveWorkflow(w.db, "app", 1))!.state, "running");
-  assert.match(String((await w.rows("SELECT instructions FROM operator_fixups WHERE state = 'queued'"))[0]!.instructions), /off by one/);
-});

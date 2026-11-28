@@ -141,7 +141,7 @@ test("started work whose person lost access is asked for before anything merges,
   assert.ok((await w.prPlan(1)).actions.some((a) => a.kind === "review" && a.permission?.ok));
 });
 
-test("a PR that failed alone in a batch, or whose screenshots show a regression, is not merged until a yes, which merges it without asking again", async () => {
+test("a PR that failed alone in a batch is not merged until a yes, which merges it without asking again; screenshots that show a regression get a fix-up instead", async () => {
   for (const what of ["batch-failed", "screenshots"] as const) {
     const w = await started("review and merge");
     assert.equal(await leg(w), "queued");
@@ -154,6 +154,13 @@ test("a PR that failed alone in a batch, or whose screenshots show a regression,
     assert.ok(!(await actions(w)).includes("merge"), what);
     if (what === "screenshots") assert.equal((await mergeVerdicts(w.db, "app", [{ number: 1, head: "sha1" }], { batch: true })).get(1)!.ok, false, "a batch that holds it goes on without it");
     await settle(w);
+    if (what === "screenshots") {
+      assert.deepEqual([(await wf(w)).state, (await wf(w)).rec], ["running", null], "no question");
+      assert.ok((await w.rows("SELECT instructions FROM operator_fixups WHERE number = 1")).some((r) => /regression/.test(String(r.instructions))));
+      assert.ok(!(await actions(w)).includes("merge"));
+      w.close();
+      continue;
+    }
     assert.deepEqual(await shown(w), ["blocked", what, MAINT]);
     await say(w, "yes", ANN);
     await settle(w);
@@ -248,7 +255,7 @@ test("an approver who can act again goes on with their approval, unasked; where 
   }
 });
 
-test("a yes does not bring the question of a pre-merge stop back: where no fix is known, it asks to fix the defects", async () => {
+test("a pre-merge stop of an approved PR with no fix round left gets a fix-up of its defects as the approver, with no question", async () => {
   const w = current = await (await (await world()).repo()).acting(MAINT, ANN);
   await w.pr(1, { label: "feature" });
   await (await w.verified(1)).premerge(1, "defect", false);
@@ -257,15 +264,11 @@ test("a yes does not bring the question of a pre-merge stop back: where no fix i
   await w.review(1);
   await w.db.run(w.db.k.updateTable("main.opus_reviews").set({ at: new Date().toISOString() }));
   await settle(w);
-  const x = await wf(w);
-  assert.deepEqual([x.state, x.rec?.parts.fix.length, x.rec?.again], ["blocked", 1, undefined], x.rec?.text ?? "");
-  await say(w, "yes");
-  await settle(w);
-  assert.deepEqual([(await wf(w)).state, await leg(w)], ["running", "fixup"]);
+  assert.deepEqual([(await wf(w)).state, (await wf(w)).rec, await leg(w)], ["running", null, "fixup"]);
   assert.ok((await w.prPlan(1)).actions.some((a) => a.kind === "fixup" && a.params?.source === "operator"));
 });
 
-test("a merge entry whose verification failed is asked once, after its pre-merge review: a yes merges it, or has the defects fixed first", async () => {
+test("a merge entry whose verification failed gets a fix-up after its pre-merge review, with no question, and merges nothing before it", async () => {
   for (const [found, fixable] of [["clean", true], ["defect", true], ["defect", false]] as const) {
     const w = current = await (await (await world()).repo(["merge", "push"])).acting(MAINT, ANN);
     await w.pr(1, { label: "feature" });
@@ -279,15 +282,9 @@ test("a merge entry whose verification failed is asked once, after its pre-merge
     if (found === "defect" && !fixable) await w.premergeRoundsSpent(1);
     await settle(w);
     const x = await wf(w);
-    assert.deepEqual([x.state, x.blocker, x.rec?.merges], ["blocked", "major-finding", true]);
-    // Defects nobody's round fixes come first: the fix is a new head, which is verified again.
-    assert.equal(x.rec!.parts.fix.length, found === "defect" && !fixable ? 1 : 0, x.rec!.text);
-    await say(w, "yes", ANN);
-    await settle(w);
-    assert.equal((await wf(w)).state, "running");
+    assert.deepEqual([x.state, x.rec], ["running", null], `${found} ${fixable}`);
     const due = (await w.prPlan(1)).actions;
-    if (found === "clean") assert.ok(due.some((a) => a.kind === "merge") && await leg(w) === "queued");
-    else assert.ok(due.some((a) => a.kind === "fixup" && a.params?.source === (fixable ? "premerge" : "operator")));
+    assert.ok(due.some((a) => a.kind === "fixup") && !due.some((a) => a.kind === "merge"), `${found} ${fixable}: ${JSON.stringify(due.map((a) => a.kind))}`);
     w.close();
   }
 });
@@ -378,19 +375,22 @@ test("where a commit of AutoCraft's came after the failed review's question, the
   assert.deepEqual([await leg(w), await actions(w)], ["review", ["review"]]);
 });
 
-test("an earlier review of the commit whose review failed is named, and the word merge does not pass over what it asks", async () => {
-  const w = await reviewFailed("review and merge", async (x) => {
+test("an earlier review of the commit whose review failed is named, and the word merge has what it asks done first", async () => {
+  const earlier = async (x: World) => {
     await x.review(1, { verdict: "take-fix", fixes: [{ file: "src/a.rs", change: "rename a" }, { file: "src/b.rs", change: "rename b" }] });
     await say(x, "review", MAINT);
-  });
-  assert.match((await wf(w)).rec!.text, /asks to fix 1 and 2/);
-  assert.doesNotMatch((await wf(w)).rec!.text, /Write merge/);
-  for (const [text, left] of [["merge", "1 and 2"], ["drop 1, merge", "2"]] as const) {
+  };
+  for (const [text, fixed] of [["merge", "1,2"], ["drop 1, merge", "2"]] as const) {
+    const w = await reviewFailed("review and merge", earlier);
+    assert.match((await wf(w)).rec!.text, /asks to fix 1 and 2/);
+    assert.doesNotMatch((await wf(w)).rec!.text, /Write merge/);
     const o = await sendAs(w, text);
-    assert.equal(o.outcome, "ambiguous", o.line);
-    assert.match(o.line, new RegExp(`without fixing ${left},`));
+    assert.equal(o.outcome, "run", o.line);
+    assert.deepEqual([(await wf(w)).entry, (await wf(w)).rec], ["review", null], text);
+    assert.match(o.line, new RegExp(`fixing ${fixed.replace(",", " and ")}, then merging`, "i"), o.line);
+    w.close();
   }
-  assert.equal((await wf(w)).entry, "review");
+  const w = await reviewFailed("review and merge", earlier);
   assert.match(await say(w, "drop 1 and 2, merge", ANN), /dropping 1 and 2.*without the review/i);
   assert.equal((await wf(w)).entry, "merge");
   w.close();
@@ -398,9 +398,8 @@ test("an earlier review of the commit whose review failed is named, and the word
   const v = await reviewFailed("review and merge", async (x) => { await x.review(1, { verdict: "hold" }); await say(x, "review", MAINT); });
   assert.match((await wf(v)).rec!.text, /says to hold it/);
   const o = await sendAs(v, "merge");
-  assert.equal(o.outcome, "ambiguous", o.line);
-  assert.match(o.line, /hold/);
-  assert.equal((await wf(v)).entry, "review");
+  assert.equal(o.outcome, "run", o.line);
+  assert.deepEqual([(await wf(v)).entry, (await wf(v)).rec], ["review", null], "the review is made again before the merge");
 });
 
 /** Issue 7 implemented by PR 1, whose review failed for good at sha1; `before` runs before that question is answered. */
@@ -475,7 +474,7 @@ test("the word merge where the review failed for good waits for the mirror to sh
   assert.equal((await wf(w, 7)).kind, "issue");
 });
 
-test("the word merge on red CI that nothing repairs is refused and the question stays; green CI closes it and the approved merge goes on", async () => {
+test("the word merge on red CI that nothing repairs runs the recommendation", async () => {
   const w = await started("review and merge");
   await pause();
   await w.db.run(w.db.k.updateTable("main.pr_checks").set({ overall: "failure", checks: JSON.stringify([{ name: "test", state: "failure" }]) }));
@@ -484,14 +483,10 @@ test("the word merge on red CI that nothing repairs is refused and the question 
   assert.deepEqual(await shown(w), ["blocked", "ci-fix-failed", MAINT]);
   const asked = await wf(w);
   await pause();
+  assert.equal(asked.rec?.again, "review");
   const o = (await runCommand(w.db, { login: ANN, canWrite: async () => true }, "github", { parsed: parse("merge"), items: [{ repo: "app", number: 1 }] })).items[0]!;
-  assert.equal(o.outcome, "refused");
-  assert.match(o.line, /CI fails on the head; it merges when CI is green\. Already asked: CI fails, and the CI fix could not repair it/);
-  await settle(w);
-  assert.deepEqual([(await wf(w)).recAt, (await wf(w)).rec], [asked.recAt, asked.rec]);
-  await w.db.run(w.db.k.updateTable("main.pr_checks").set({ overall: "success", checks: "[]" }));
-  await settle(w);
-  assert.deepEqual([...await shown(w), await leg(w)], ["running", null, MAINT, "queued"]);
+  assert.equal(o.outcome, "run", o.line);
+  assert.deepEqual([(await wf(w)).state, (await wf(w)).rec], ["running", null]);
 });
 
 test("red CI that ended the merge leg is one question: green CI closes it and a new leg starts", async () => {
@@ -514,7 +509,7 @@ test("red CI that ended the merge leg is one question: green CI closes it and a 
   }
 });
 
-test("the word merge on a merge entry's red CI is refused and the question stays", async () => {
+test("the word merge on a merge entry's red CI runs the recommendation", async () => {
   const w = await started("merge", { review: false });
   await pause();
   await w.db.run(w.db.k.updateTable("main.pr_checks").set({ overall: "failure", checks: JSON.stringify([{ name: "test", state: "failure" }]) }));
@@ -523,7 +518,7 @@ test("the word merge on a merge entry's red CI is refused and the question stays
   const asked = await wf(w);
   assert.equal(asked.rec?.cause?.code, "red-ci");
   const o = await sendAs(w, "merge");
-  assert.deepEqual([o.outcome, (await wf(w)).recAt], ["refused", asked.recAt], o.line);
+  assert.deepEqual([o.outcome, (await wf(w)).rec], ["run", null], o.line);
 });
 
 test("a quiet pull request whose fixes nobody can make or be asked for comes back, also where its merge is not approved", async () => {

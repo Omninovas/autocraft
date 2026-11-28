@@ -117,7 +117,7 @@ test("someone else's commits end the leg and go to the review round, also under 
   }
 });
 
-test("the review a push of ours owes a merge entry stops it on a hold, and has its fixes made on a take-fix", async () => {
+test("the review a push of ours owes a merge entry has a hold fixed first, and its fixes made on a take-fix", async () => {
   const w = (current = await (await (await world()).repo()).acting());
   for (const n of [1, 2]) {
     await approved(w, { n, state: "ci", entry: "merge" });
@@ -128,7 +128,7 @@ test("the review a push of ours owes a merge entry stops it on a hold, and has i
   await w.review(1, { verdict: "hold" });
   await w.review(2, { verdict: "take-fix" });
   await tick(w);
-  assert.deepEqual([(await liveWorkflow(w.db, "app", 1))!.blocker, (await legOf(w, 1)).state], ["major-finding", "cancelled"]);
+  assert.deepEqual([(await liveWorkflow(w.db, "app", 1))!.rec, (await legOf(w, 1)).state], [null, "fixup"], "a hold gets a fix-up and a new leg, no question");
   assert.deepEqual([(await liveWorkflow(w.db, "app", 2))!.state, (await legOf(w, 2)).state], ["running", "review"]);
   assert.ok((await w.prPlan(2)).actions.some((a) => a.kind === "fixup" && a.params?.bucket === "fix"));
 });

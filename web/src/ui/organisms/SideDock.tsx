@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
-import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from "react-resizable-panels";
+import { Panel, PanelGroup, type ImperativePanelHandle } from "react-resizable-panels";
 import { SidebarSimpleIcon, XIcon } from "@phosphor-icons/react";
+import { ResizeHandle } from "../atoms/ResizeHandle";
 import { Tabs } from "../molecules/Tabs";
 import { cn } from "../cn";
 import { layoutStorage, usePref } from "../../shell/layoutStorage";
@@ -155,12 +156,7 @@ function WideDock<V extends string>({ id, login, main, views, view, onView, open
       <Panel id="main" order={0} defaultSize={100 - widthOf(current)} minSize={MAIN_MIN} className="min-w-0">
         {main}
       </Panel>
-      <PanelResizeHandle
-        aria-label={t("Resize side panel")}
-        className="group relative flex w-2 shrink-0 items-stretch justify-center focus-visible:outline-none"
-      >
-        <span className="w-px bg-line group-hover:bg-ink/30 group-focus-visible:w-0.5 group-focus-visible:bg-accent-ink group-data-[resize-handle-active]:bg-accent-ink" />
-      </PanelResizeHandle>
+      <ResizeHandle label={t("Resize side panel")} />
       <Panel ref={sidePanel} id="side" order={1} defaultSize={widthOf(current)} onResize={(size) => storage.setItem(widthKey(shown.current), String(Math.round(size * 10) / 10))} minSize={20} maxSize={100 - MAIN_MIN} className="min-w-0">
         <div ref={sideBox} tabIndex={-1} aria-label={t("Side panel")} role="region" className={cn("flex h-full min-h-0 flex-col bg-panel outline-none")}>
           <div className="flex shrink-0 items-center border-b border-line pr-1">

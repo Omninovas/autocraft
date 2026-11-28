@@ -10,6 +10,7 @@ import { parseSearch } from "../../db/search.ts";
 import { queryDb } from "../../db/query-db.ts";
 import { itemOfValue, KINDS, type ItemQuery, type QueryTerm } from "../../core/item-query.ts";
 import { ownerOf } from "../../owners.ts";
+import { reviewBots } from "../../review/bots.ts";
 import { hiddenRepos } from "../control/fragments.ts";
 import { heldExpr } from "../intake/fragments.ts";
 import { stuckItem } from "../planner/fragments.ts";
@@ -36,7 +37,6 @@ export type BrowsePage = { rows: BrowseItem[]; total: number };
 export type BrowseOpts = { offset: number; limit: number; normalWeight: number; refs?: string[] };
 
 const MAINTAINER_ASSOCIATIONS = ["OWNER", "MEMBER", "COLLABORATOR"];
-const OUTSIDE_ASSOCIATIONS = ["CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "NONE"];
 const CI: Record<string, string[]> = { green: ["SUCCESS"], red: ["FAILURE", "ERROR"], pending: ["PENDING", "EXPECTED"] };
 const ITEM_STATE: Record<string, string> = { open: "OPEN", closed: "CLOSED", merged: "MERGED" };
 /** What a person did that makes an item theirs (chat-build plan 1.5): the workflow event kinds. */
@@ -62,7 +62,12 @@ function facts(db: Db, scope: BrowseScope, inner: (eb: kx.AnyEb) => Expression<S
   const rank = (path: string) => kx.jsonText(db, "r.breakdown", path);
   const me = scope.login ?? "";
   const insider = (eb: any) => kx.inList(db, eb.fn("lower", [eb.fn.coalesce("i.author", eb.val(""))]), [...(scope.insiders ?? [])]);
-  const bot = (eb: any) => eb.or([eb("i.author_type", "=", "Bot"), eb("i.author", "like", "%[bot]")]);
+  // As isBotAuthor (src/data/intake/pure.ts): the mirror's author type, or for rows synced before it was stored a `[bot]` suffix or a known app login.
+  const bot = (eb: any) => eb.or([
+    eb(eb.fn.coalesce("i.author_type", eb.val("")), "=", "Bot"),
+    eb(eb.fn.coalesce("i.author", eb.val("")), "like", "%[bot]"),
+    eb.and([eb("i.author_type", "is", null), kx.inList(db, eb.fn("lower", [eb.fn.coalesce("i.author", eb.val(""))]), [...reviewBots(), "github-actions"])]),
+  ]);
   return k.selectFrom("main.items as i")
     .leftJoin("main.item_rank as r", (j: any) => j.onRef("r.repo", "=", "i.repo").onRef("r.number", "=", "i.number"))
     .leftJoin("main.item_workflows as w", (j: any) => j.onRef("w.repo", "=", "i.repo").onRef("w.number", "=", "i.number").on("w.state", "in", LIVE_STATES))
@@ -76,7 +81,7 @@ function facts(db: Db, scope: BrowseScope, inner: (eb: kx.AnyEb) => Expression<S
       "i.repo", "i.number", "i.kind", "i.state", "i.is_draft", "i.title", "i.author", "i.labels", "i.ci_state", "i.created_at", "i.updated_at", "i.head_oid",
       "i.author_association", "w.weight", "r.score", "ia.area",
       // As the pipeline judges authors (src/data/intake/pure.ts): the team is the repo's collaborators and the insiders, bots aside.
-      eb.case().when(eb.and([eb("i.author_association", "in", OUTSIDE_ASSOCIATIONS), eb.not(insider(eb))])).then(1).else(0).end().as("outside"),
+      eb.case().when(eb.and([eb("i.author", "is not", null), eb(eb.fn.coalesce("i.author_association", eb.val("")), "not in", MAINTAINER_ASSOCIATIONS), eb.not(insider(eb)), eb.not(bot(eb))])).then(1).else(0).end().as("outside"),
       eb.case().when(eb.and([eb("i.author", "is not", null), eb.or([eb("i.author_association", "in", MAINTAINER_ASSOCIATIONS), insider(eb)]), eb.not(bot(eb))])).then(1).else(0).end().as("team"),
       eb.fn.coalesce("i.comments_count", eb.lit(0)).as("comments"),
       eb.fn.coalesce("i.reactions_count", eb.lit(0)).as("reactions"),

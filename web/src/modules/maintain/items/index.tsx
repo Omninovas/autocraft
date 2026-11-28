@@ -1,17 +1,13 @@
-// The Items page: a paged browser over every item of the visible repos, with a qualifier search, views, quick filters
-// and a command box for several items at once. On desktop the item in `?open=` shows in a resizable panel beside the list.
+// The Items page: a paged browser over every item of the visible repos, with a qualifier search, views, filters and a
+// command bar for several items at once. On desktop the item in `?open=` shows in a resizable panel beside the list, which
+// the view lays out itself, since the panel shows only while an item is open.
 import type { FeatureModule, PanelDef } from "../../../registry/types";
 import { lazyView } from "../../../registry/lazyView";
 import { t } from "../../../../../src/i18n/index.ts";
 
 const ItemsView = lazyView(() => import("./views"), "ItemsView");
-const ItemPanel = lazyView(() => import("./ItemPanel"), "ItemPanel");
 
-// Phones use `phone` (the list alone; a row opens the item page), so the panel shows on desktop only.
-const panels: PanelDef[] = [
-  { id: "main", title: t("Items"), component: ItemsView, defaultSize: 58, minSize: 36 },
-  { id: "item", title: t("Item"), component: ItemPanel, defaultSize: 42, minSize: 28, collapsible: true },
-];
+const panels: PanelDef[] = [{ id: "main", title: t("Items"), component: ItemsView, defaultSize: 100 }];
 
 export const maintainItemsModule: FeatureModule = {
   id: "maintain-items",

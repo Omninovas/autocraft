@@ -59,9 +59,26 @@ export function itemOfValue(v: string): { owner: string | null; repo: string; nu
   return m && number > 0 ? { owner: m[1] ?? null, repo: m[2]!, number } : null;
 }
 
-/** The `items:` term of these items (`repo` may carry its owner, `owner/repo`), at most MAX_ITEMS of them. */
-export function itemsTerm(items: readonly { repo: string; number: number }[]): string {
-  return `items:${items.slice(0, MAX_ITEMS).map((i) => `${i.repo}/${i.number}`).join(",")}`;
+/** The longest query the parser reads. */
+export const QUERY_MAX = 4000;
+
+/**
+ * The `items:` term of these items (`repo` may carry its owner, `owner/repo`): at most MAX_ITEMS of them and no longer than a
+ * query can be. An owner that is the repo's own (`ownerOf`) is left out, so the term stays short.
+ */
+export function itemsTerm(items: readonly { repo: string; number: number }[], ownerOf?: (repo: string) => string): string {
+  const out: string[] = [];
+  let length = "items:".length;
+  for (const i of items.slice(0, MAX_ITEMS)) {
+    const slash = i.repo.lastIndexOf("/");
+    const name = i.repo.slice(slash + 1);
+    const own = slash > 0 && ownerOf && ownerOf(name).toLowerCase() === i.repo.slice(0, slash).toLowerCase();
+    const v = `${own ? name : i.repo}/${i.number}`;
+    if (length + v.length + 1 > QUERY_MAX) break;
+    out.push(v);
+    length += v.length + 1;
+  }
+  return `items:${out.join(",")}`;
 }
 
 /** Validates and normalises one value of `key`; null when it is not a value of that key. */
@@ -97,7 +114,7 @@ function value(key: QueryKey, raw: string): string | null {
 export function tokens(q: string): string[] {
   const out: string[] = [];
   const re = /-?(?:[A-Za-z-]+:)?"[^"]*"?|\S+/g;
-  const s = q.slice(0, 4000);
+  const s = q.slice(0, QUERY_MAX);
   for (let m = re.exec(s); m && out.length < MAX_TOKENS; m = re.exec(s)) out.push(m[0]);
   return out;
 }
@@ -167,6 +184,15 @@ export function parseItemQuery(q: string): ItemQuery {
       continue;
     }
     const key = ALIASES[name];
+    if (key === "items") {
+      // A pasted list keeps the items that read; only the others are not applied.
+      const good = parts.map((p) => value("items", p));
+      const bad = parts.filter((_, i) => good[i] === null);
+      const vs = [...new Set(good.filter((v): v is string => v !== null))];
+      if (vs.length) terms.push({ key, values: vs, not });
+      if (bad.length || !vs.length) unknown.push(`${not ? "-" : ""}items:${(bad.length ? bad : parts).join(",")}`);
+      continue;
+    }
     const vs = key ? parts.map((p) => value(key, p)) : [];
     if (!key || !vs.length || vs.some((v) => v === null)) {
       unknown.push(tok);

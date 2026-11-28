@@ -10,7 +10,7 @@ import { ItemConversation } from "./ItemConversation";
  * An item's chat with AutoCraft as one column: its main conversation with the composer, or one line while it has none, with the
  * item's holds (`holds`) right above the composer either way.
  */
-export function ItemChatPane({ chat, error, holds, onSend, onWithdraw, onEvent, onGithub }: {
+export function ItemChatPane({ chat, error, holds, onSend, onWithdraw, onEvent, onGithub, draftKey }: {
   chat: ItemChat | undefined;
   error?: Error;
   holds: ReactNode;
@@ -18,6 +18,8 @@ export function ItemChatPane({ chat, error, holds, onSend, onWithdraw, onEvent, 
   onWithdraw: () => Promise<void>;
   onEvent: (id: string) => void;
   onGithub: () => void;
+  /** Keeps the composer's unsent text under this key while the pane changes items. */
+  draftKey?: string;
 }) {
   if (!chat)
     return (
@@ -26,7 +28,7 @@ export function ItemChatPane({ chat, error, holds, onSend, onWithdraw, onEvent, 
       </div>
     );
   const conv = chat.conversations[0];
-  if (conv) return <ItemConversation c={conv} onSend={onSend} onWithdraw={onWithdraw} onEvent={onEvent} onGithub={onGithub} notice={holds} />;
+  if (conv) return <ItemConversation c={conv} onSend={onSend} onWithdraw={onWithdraw} onEvent={onEvent} onGithub={onGithub} notice={holds} {...(draftKey ? { draftKey } : {})} />;
   return (
     <div className="flex flex-1 flex-col">
       <div className="flex flex-1 items-center justify-center px-4">

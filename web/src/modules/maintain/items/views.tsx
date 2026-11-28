@@ -4,19 +4,19 @@
 // row click opens the item beside the list (`open=<repo>/<n>`). People who may send commands tick items, which brings up the
 // command bar at the bottom; the ticks are the command's items, kept across pages and searches, and the bar takes only the
 // command's words. The command runs for each item on its own.
-import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type Ref, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { CaretDownIcon, ChatCircleIcon, CheckCircleIcon, CircleDashedIcon, DiscordLogoIcon, FunnelIcon, GitPullRequestIcon, RadioButtonIcon, UsersThreeIcon, XCircleIcon, XIcon } from "@phosphor-icons/react";
 import { t } from "../../../../../src/i18n/index.ts";
 import {
-  AUTOCRAFT_STATES, DEFAULT_QUERY, itemOfValue, itemsTerm, KINDS, PRESETS, PRIORITIES, parseItemQuery, presetOf, splitWords, termValues, tokens, withTerm,
+  AUTOCRAFT_STATES, DEFAULT_QUERY, itemOfValue, itemsTerm, KINDS, MAX_ITEMS, PRESETS, PRIORITIES, parseItemQuery, presetOf, splitWords, termValues, tokens, withTerm,
   type QueryKey, type QueryTerm,
 } from "../../../../../src/core/item-query.ts";
 import { itemsIn, listForm, parse } from "../../../../../src/workflow/parse.ts";
 import { useApi, useQuery } from "../../../api/client";
 import { usePageProject } from "../../../api/scope";
 import type { BrowseAutocraft, BrowseRow, MaintainCommandResult } from "../../../api/types";
-import { githubItemUrl, itemPath } from "../../../lib/links";
+import { githubItemUrl, itemPath, ownerOfRepo } from "../../../lib/links";
 import { num } from "../../../lib/format";
 import { useUser } from "../../../shell/UserContext";
 import { useIsPhone } from "../../../shell/useMedia";
@@ -34,8 +34,14 @@ import { Pager } from "../../../ui/molecules/Pager";
 import { SearchField } from "../../../ui/molecules/SearchField";
 import { Segmented } from "../../../ui/molecules/Segmented";
 import { cn } from "../../../ui/cn";
-import type { ViewProps } from "../../../registry/types";
-import { OPEN_PARAM, openItemAttrs, parseOpenItem, useOpenItem } from "./openItem";
+import type { Command, ViewProps } from "../../../registry/types";
+import { Panel, PanelGroup } from "react-resizable-panels";
+import { useShortcutHelp } from "../../../shell/keyboard";
+import { layoutStorage } from "../../../shell/layoutStorage";
+import { ResizeHandle } from "../../../ui/atoms/ResizeHandle";
+import { OverflowMenu } from "../../../ui/molecules/OverflowMenu";
+import { OPEN_PARAM, openItemAttrs, parseOpenItem, readableSearch, useOpenItem } from "./openItem";
+import { ItemPanel } from "./ItemPanel";
 
 const PAGE = 50;
 /** Items in one command, as the server takes them (src/dash/api/commands.ts). */
@@ -60,9 +66,6 @@ function legacyQuery(p: URLSearchParams): string | null {
   return parts.length > 1 || show || parts[0] === "is:mine" ? parts.join(" ") : null;
 }
 
-/** Search parameters as text, with `:`, `,` and `/` left readable: `?q=is:open+label:bug&open=photocraft/12`. */
-const readable = (p: URLSearchParams) => p.toString().replace(/%3A/gi, ":").replace(/%2C/gi, ",").replace(/%2F/gi, "/");
-
 /** The query, page and opened item in the URL. Other parameters (`repo`, `open`) stay. */
 function useBrowseUrl() {
   const loc = useLocation();
@@ -72,7 +75,7 @@ function useBrowseUrl() {
   const offset = Math.max(0, Number(params.get("offset")) || 0);
   const meaning = params.get("by") === "meaning";
   const write = (next: URLSearchParams) => {
-    const search = readable(next);
+    const search = readableSearch(next);
     navigate({ pathname: loc.pathname, search: search ? `?${search}` : "" });
   };
   const go = (next: { q?: string; offset?: number; meaning?: boolean }) => {
@@ -140,60 +143,125 @@ function SelectAll({ refs, picked, onPick, boxRef }: { refs: string[]; picked: R
   );
 }
 
-/** Line 2 of a row: AutoCraft's state and markers, then size, CI, counts and the linked item, then the labels. */
-function Facts({ r, children }: { r: BrowseRow; children?: ReactNode }) {
+/** A row's facts, each one element, so the desktop line and the phone strip place the same pieces. `compact`: narrower badges. */
+function factsOf(r: BrowseRow, compact = false) {
+  const pad = compact ? "px-1.5" : undefined;
   const word = AUTOCRAFT_WORD[r.autocraft];
   const size = r.size ? t("Size {s}", { s: r.size }) : "";
+  return {
+    asks: r.asksYou && <Badge tone="accent">{t("Asks you")}</Badge>,
+    state: (short: boolean) => word && (
+      <span title={t(AUTOCRAFT_TITLE[r.autocraft])} className="relative z-10">
+        <Badge tone={word.tone} className={pad}>
+          {short && r.autocraft === "stopped" ? (
+            <>
+              {t("Stopped")}
+              <span className="sr-only"> {t("by the rule")}</span>
+            </>
+          ) : (
+            t(word.label)
+          )}
+        </Badge>
+      </span>
+    ),
+    priority: r.priority && <Badge tone={priorityTone(r.priority)} className={pad}>{r.priority}</Badge>,
+    duplicate: r.duplicate && <Badge tone="warn">{t("Duplicate")}</Badge>,
+    size: r.size && (
+      <span role="img" aria-label={size} title={size} className="code relative z-10 inline-flex h-4 items-center rounded-sm border border-line-strong px-1 text-2xs text-ink/80">
+        {r.size}
+      </span>
+    ),
+    ci: r.ci && <Ci ci={r.ci} />,
+    comments: r.comments + r.reactions > 0 && (
+      <span className="relative z-10 inline-flex items-center gap-1" title={t("{c} comments, {r} reactions", { c: r.comments, r: r.reactions })}>
+        <ChatCircleIcon aria-hidden />
+        <span className="num">{r.comments}</span>
+        <span className="sr-only">{t("comments")}</span>
+      </span>
+    ),
+    discord: r.discord > 0 && (
+      <span className="relative z-10 inline-flex items-center gap-1" title={t("{n} mentions on Discord", { n: r.discord })}>
+        <DiscordLogoIcon aria-hidden />
+        <span className="num">{r.discord}</span>
+        <span className="sr-only">{t("mentions on Discord")}</span>
+      </span>
+    ),
+    linked: r.linked !== null && (
+      <Link
+        to={itemPath(r.repo, r.linked)}
+        className="relative z-10 inline-flex items-center gap-0.5 hover:underline"
+        aria-label={r.kind === "pr" ? t("Closes #{n}", { n: r.linked }) : t("Pull request #{n}", { n: r.linked })}
+      >
+        {r.kind === "pr" ? <RadioButtonIcon aria-hidden /> : <GitPullRequestIcon aria-hidden />}
+        <span className="num">#{r.linked}</span>
+      </Link>
+    ),
+  };
+}
+
+/** Lines 2 and 3 start under the ref, past the kind icon (1.2em of the title's 14 px) and its gap. */
+const UNDER_TITLE = "pl-[calc(16.8px+0.5rem)]";
+
+/** Desktop line 2: AutoCraft's state and markers, then size, CI, counts and the linked item, then the labels. */
+function Facts({ r }: { r: BrowseRow }) {
+  const f = factsOf(r);
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 pl-6 text-xs text-ink/70">
-      {r.asksYou && <Badge tone="accent">{t("Asks you")}</Badge>}
-      {word && (
-        <span title={t(AUTOCRAFT_TITLE[r.autocraft])} className="relative z-10">
-          <Badge tone={word.tone}>{t(word.label)}</Badge>
-        </span>
-      )}
-      {r.priority && <Badge tone={priorityTone(r.priority)}>{r.priority}</Badge>}
-      {r.duplicate && <Badge tone="warn">{t("Duplicate")}</Badge>}
-      {r.size && (
-        <span role="img" aria-label={size} title={size} className="code relative z-10 inline-flex h-4 items-center rounded-sm border border-line-strong px-1 text-2xs text-ink/80">
-          {r.size}
-        </span>
-      )}
-      <Ci ci={r.ci} />
-      {r.comments + r.reactions > 0 && (
-        <span className="relative z-10 inline-flex items-center gap-1" title={t("{c} comments, {r} reactions", { c: r.comments, r: r.reactions })}>
-          <ChatCircleIcon aria-hidden />
-          <span className="num">{r.comments}</span>
-          <span className="sr-only">{t("comments")}</span>
-        </span>
-      )}
-      {r.discord > 0 && (
-        <span className="relative z-10 inline-flex items-center gap-1" title={t("{n} mentions on Discord", { n: r.discord })}>
-          <DiscordLogoIcon aria-hidden />
-          <span className="num">{r.discord}</span>
-          <span className="sr-only">{t("mentions on Discord")}</span>
-        </span>
-      )}
-      {r.linked !== null && (
-        <Link
-          to={itemPath(r.repo, r.linked)}
-          className="relative z-10 inline-flex items-center gap-0.5 hover:underline"
-          aria-label={r.kind === "pr" ? t("Closes #{n}", { n: r.linked }) : t("Pull request #{n}", { n: r.linked })}
-        >
-          {r.kind === "pr" ? <RadioButtonIcon aria-hidden /> : <GitPullRequestIcon aria-hidden />}
-          <span className="num">#{r.linked}</span>
-        </Link>
-      )}
-      {r.labels.map((l, i) => (
-        <LabelPill key={l} name={l} className={cn(i >= PHONE_LABELS && "max-md:hidden")} />
+    <div className={cn("mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink/70", UNDER_TITLE)}>
+      {f.asks}
+      {f.state(false)}
+      {f.priority}
+      {f.duplicate}
+      {f.size}
+      {f.ci}
+      {f.comments}
+      {f.discord}
+      {f.linked}
+      {r.labels.map((l) => (
+        <LabelPill key={l} name={l} />
       ))}
-      {r.labels.length > PHONE_LABELS && (
-        <span className="md:hidden">
-          +{r.labels.length - PHONE_LABELS}
-          <span className="sr-only"> {t("labels")}</span>
+    </div>
+  );
+}
+
+/**
+ * Phone lines 2 and 3. Line 2 is one strip that never wraps: state, priority, size, CI, comments, the linked item and Discord, each
+ * in a slot of fixed width so the slots line up from row to row; a missing value takes no slot. Line 3: the markers and two labels,
+ * "+n", and the author and time at the right.
+ */
+function PhoneFacts({ r, byCreated }: { r: BrowseRow; byCreated: boolean }) {
+  const f = factsOf(r, true);
+  const slot = (node: ReactNode, width: string) => node && <span className={cn("flex shrink-0 items-center", width)}>{node}</span>;
+  // The markers take a label's place, so line 3 keeps to what fits.
+  const shownLabels = Math.max(0, PHONE_LABELS - (r.asksYou ? 1 : 0) - (r.duplicate ? 1 : 0));
+  const more = r.labels.length - shownLabels;
+  return (
+    <div className={cn("mt-1 flex flex-col gap-1.5 text-xs text-ink/70", UNDER_TITLE)}>
+      {/* Slot widths hold the widest value of each (a state word, P0, XL, two-digit counts, a five-digit number). */}
+      <div className="flex h-5 flex-nowrap items-center gap-1 overflow-hidden">
+        {slot(f.state(true), "w-[3.6rem]")}
+        {slot(f.priority, "w-[1.75rem]")}
+        {slot(f.size, "w-[1.4rem]")}
+        {slot(f.ci, "w-4")}
+        {slot(f.comments, "w-[1.9rem]")}
+        {slot(f.linked, "w-[3.3rem]")}
+        {slot(f.discord, "w-[1.9rem]")}
+      </div>
+      <div className="flex min-h-5 items-center gap-1.5">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+          {f.asks}
+          {f.duplicate}
+          {r.labels.slice(0, shownLabels).map((l) => (
+            <LabelPill key={l} name={l} className="min-w-[2.75rem] max-w-[7rem] shrink" />
+          ))}
+          {more > 0 && (
+            <span className="shrink-0">
+              +{more}
+              <span className="sr-only"> {t("labels")}</span>
+            </span>
+          )}
         </span>
-      )}
-      {children}
+        <Who r={r} byCreated={byCreated} className="shrink-0" />
+      </div>
     </div>
   );
 }
@@ -202,7 +270,7 @@ function Facts({ r, children }: { r: BrowseRow; children?: ReactNode }) {
 function Who({ r, byCreated, className }: { r: BrowseRow; byCreated: boolean; className?: string }) {
   return (
     <span className={cn("flex items-center gap-1 whitespace-nowrap", className)}>
-      {r.author && <span className="max-w-[10rem] truncate">{r.author}</span>}
+      {r.author && <span className="max-w-[7rem] truncate md:max-w-[10rem]">{r.author}</span>}
       {r.team && (
         <span role="img" aria-label={t("On the team")} title={t("On the team")} className="relative z-10 inline-flex text-accent-ink">
           <UsersThreeIcon weight="bold" />
@@ -215,8 +283,8 @@ function Who({ r, byCreated, className }: { r: BrowseRow; byCreated: boolean; cl
   );
 }
 
-function Row({ r, opened, byCreated, picking, picked, may, onPick, onOpen }: {
-  r: BrowseRow; opened: boolean; byCreated: boolean; picking: boolean; picked: boolean; may: boolean; onPick: (on: boolean) => void; onOpen: ((keyboard: boolean) => void) | null;
+function Row({ r, opened, byCreated, picking, picked, may, onPick, onOpen, phone }: {
+  phone: boolean; r: BrowseRow; opened: boolean; byCreated: boolean; picking: boolean; picked: boolean; may: boolean; onPick: (on: boolean) => void; onOpen: ((keyboard: boolean) => void) | null;
 }) {
   // On desktop the row itself takes the focus: a click on it, away from its links and tick box, or Enter on it opens the item
   // beside the list. On phones the item link covers the row.
@@ -239,23 +307,23 @@ function Row({ r, opened, byCreated, picking, picked, may, onPick, onOpen }: {
       aria-current={opened ? "true" : undefined}
       data-row={refOf(r)}
       onClick={click}
-      {...(onOpen && { tabIndex: 0, "aria-label": `${refOf(r)} ${r.title}`, onKeyDown: key, ...openItemAttrs(r.repo, r.number) })}
+      {...(onOpen && { tabIndex: 0, "aria-describedby": ROW_HINT, onKeyDown: key, ...openItemAttrs(r.repo, r.number) })}
     >
       {picking && <Tick label={t("Select {ref}", { ref: refOf(r) })} checked={picked} disabled={!may} onChange={onPick} />}
       <div className="min-w-0 flex-1">
         <ItemRef repo={r.repo} number={r.number} kind={r.kind} state={r.state} draft={r.draft} title={r.title} github={false} stretch="phone" />
-        {/* On phones the author and time end line 2, so the title keeps the row's width. */}
-        <Facts r={r}>
-          <Who r={r} byCreated={byCreated} className="ml-auto md:hidden" />
-        </Facts>
+        {phone ? <PhoneFacts r={r} byCreated={byCreated} /> : <Facts r={r} />}
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-1.5 pt-0.5 text-xs text-ink/70">
+      <div className="flex shrink-0 flex-col items-end gap-1.5 pt-0.5 text-xs text-ink/70 max-md:hidden">
         <GithubButton href={githubItemUrl(r.repo, r.number, r.kind)} label={t("Open {ref} on GitHub", { ref: refOf(r) })} />
-        <Who r={r} byCreated={byCreated} className="max-md:hidden" />
+        <Who r={r} byCreated={byCreated} />
       </div>
     </li>
   );
 }
+
+/** The id of the screen-reader description of a focusable row. */
+const ROW_HINT = "items-row-hint";
 
 const SORT_OPTIONS: [string, string][] = [
   ["updated", "Recently updated"], ["created", "Newest"], ["created-asc", "Oldest"], ["comments", "Most discussed"], ["priority", "Priority"], ["discord", "Discord mentions"],
@@ -392,7 +460,7 @@ function CommandBar({ text, setText, items, onClear, onDone, reply, onCloseReply
   };
   return (
     <section aria-label={t("Command")} className="shrink-0 border-t border-line-strong bg-raised shadow-[0_-6px_18px_rgba(0,0,0,0.14)]">
-      <div className="mx-auto flex max-w-[1100px] flex-col gap-2 px-4 py-2.5 md:px-6">
+      <div className="mx-auto flex max-w-[1180px] flex-col gap-2 px-4 py-2.5 md:px-6">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {items.length > 0 ? (
             <span className="flex items-center gap-1">
@@ -433,7 +501,7 @@ function CommandBar({ text, setText, items, onClear, onDone, reply, onCloseReply
           )}
           {reply && (
             <span className="ml-auto flex items-center gap-1">
-              <Button variant="ghost" size="sm" icon={CaretDownIcon} aria-expanded={showReply} aria-controls="items-command-reply" onClick={() => setShowReply(!showReply)} className={cn("max-md:h-11 [&>svg]:transition-transform", !showReply && "[&>svg]:-rotate-90")}>
+              <Button id="items-command-reply-toggle" variant="ghost" size="sm" icon={CaretDownIcon} aria-expanded={showReply} aria-controls="items-command-reply" onClick={() => setShowReply(!showReply)} className={cn("max-md:h-11 [&>svg]:transition-transform", !showReply && "[&>svg]:-rotate-90")}>
                 {t("Reply")}
               </Button>
               <Button variant="ghost" size="sm" icon={XIcon} aria-label={t("Close reply")} onClick={onCloseReply} className="max-md:h-11 max-md:w-11" />
@@ -465,9 +533,9 @@ function CommandBar({ text, setText, items, onClear, onDone, reply, onCloseReply
 function listKey(e: KeyboardEvent<HTMLUListElement>, open: ((ref: string) => void) | null) {
   const target = e.target as HTMLElement;
   const tick = target instanceof HTMLInputElement && target.type === "checkbox";
-  if ((target.tagName === "INPUT" && !tick) || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+  if ((target.tagName === "INPUT" && !tick) || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || e.ctrlKey || e.metaKey || e.altKey) return;
   const row = target.closest<HTMLLIElement>("li[data-row]");
-  if (e.key === "p" && open && row) {
+  if (e.key === "p" && !e.ctrlKey && !e.metaKey && !e.altKey && open && row) {
     e.preventDefault();
     open(row.dataset.row!);
     return;
@@ -503,7 +571,83 @@ function MatchToggle({ meaning, onChange, className }: { meaning: boolean; onCha
   );
 }
 
-export function ItemsView(_: ViewProps) {
+/**
+ * The views as chips that wrap to at most two lines; those that do not fit go into a More menu, and the picked one always shows.
+ * The chips are measured in a hidden copy of the row.
+ */
+function ViewChips({ picked, counts, onPick }: { picked: string | null; counts: Record<string, number> | null; onPick: (query: string) => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const ruler = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState(PRESETS.length);
+  const count = (id: string) => (counts ? num(counts[id] ?? 0) : undefined);
+  useLayoutEffect(() => {
+    const el = box.current, m = ruler.current;
+    if (!el || !m) return;
+    const GAP = 8;
+    const calc = () => {
+      const widths = [...m.children].map((c) => (c as HTMLElement).offsetWidth);
+      const more = widths.pop()!;
+      const lines = (ws: number[]) => {
+        let n = 1, x = 0;
+        for (const w of ws) x = x && x + GAP + w > el.clientWidth ? (n++, w) : x ? x + GAP + w : w;
+        return n;
+      };
+      let n = PRESETS.length;
+      if (lines(widths) > 2) while (n > 1 && lines([...widths.slice(0, n), more]) > 2) n--;
+      setFit(n);
+    };
+    calc();
+    const ro = new ResizeObserver(calc);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [counts]);
+  const at = PRESETS.findIndex((p) => p.id === picked);
+  const shown = fit >= PRESETS.length ? [...PRESETS] : at >= fit ? [...PRESETS.slice(0, fit - 1), PRESETS[at]!] : PRESETS.slice(0, fit);
+  const rest = PRESETS.filter((p) => !shown.includes(p));
+  const chipCls = "shrink-0 max-md:h-11";
+  return (
+    <div className="relative">
+      <div ref={box} className="flex flex-wrap gap-2" role="group" aria-label={t("Views")}>
+        {shown.map((p) => (
+          <Chip key={p.id} active={picked === p.id} className={chipCls} count={count(p.id)} onClick={() => onPick(p.query)}>
+            {t(p.label)}
+          </Chip>
+        ))}
+        <OverflowMenu
+          label={t("More views")}
+          actions={rest.map((p) => ({ key: p.id, label: counts ? `${t(p.label)} (${count(p.id)})` : t(p.label), onSelect: () => onPick(p.query) }))}
+          trigger={
+            <Chip caret className={chipCls}>
+              {t("More")}
+            </Chip>
+          }
+        />
+      </div>
+      <div ref={ruler} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 flex gap-2 whitespace-nowrap">
+        {PRESETS.map((p) => (
+          <span key={p.id} className={cn("chip", chipCls)}>
+            {t(p.label)}
+            {counts && <span className="num opacity-60">{count(p.id)}</span>}
+          </span>
+        ))}
+        <span className={cn("chip", chipCls)}>
+          {t("More")}
+          <CaretDownIcon className="text-[10px] opacity-60" />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Keys of a focused row on desktop, for the shortcut sheet. */
+const ROW_KEYS: Command[] = [
+  { id: "items-row-open", keys: "enter", label: t("Open the focused item beside the list"), group: t("Items") },
+  { id: "items-row-open-p", keys: "p", label: t("Open the focused item beside the list"), group: t("Items") },
+  { id: "items-panel-close", keys: "escape", label: t("Close the item panel, from inside it"), group: t("Items") },
+];
+const PANEL_WIDTH = "items:panel-width";
+
+export function ItemsView(props: ViewProps) {
   const user = useUser();
   const project = usePageProject();
   const url = useBrowseUrl();
@@ -514,21 +658,22 @@ export function ItemsView(_: ViewProps) {
   const [reply, setReply] = useState<{ lines: string[]; ok: boolean } | null>(null);
   const [announced, setAnnounced] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const activeChip = useRef<HTMLButtonElement>(null);
   const selectAllBox = useRef<HTMLInputElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   const writes = user.role !== "viewer" && user.runRepos.length > 0;
 
   useEffect(() => setTyped(url.q), [url.q]);
-  // On phones the views scroll sideways: the picked one stays in sight.
-  // A block body: browsers with scroll promises return one from scrollIntoView, and React would call it as the cleanup.
-  useEffect(() => {
-    activeChip.current?.scrollIntoView({ block: "nearest", inline: "center" });
-  }, [url.q]);
+  useShortcutHelp(phone ? [] : ROW_KEYS);
+  const storage = useMemo(() => layoutStorage(user.login), [user.login]);
+  const savedWidth = Number(storage.getItem(PANEL_WIDTH));
+  const panelWidth = savedWidth >= 28 && savedWidth <= 64 ? savedWidth : 42;
 
   // A search by meaning embeds the words; the qualifiers still filter its hits, which keep their order.
   const split = url.meaning ? splitWords(url.q) : null;
-  const { data, error } = useQuery(`maintain-browse:${url.q}:${url.offset}:${url.meaning}`, async (a) => {
-    if (!split?.words) return a.maintain.browse({ q: url.q, offset: url.offset, limit: PAGE });
+  // A list of named items shows on one page, so Select all shown covers all of them.
+  const limit = termValues(url.q, "items").length ? MAX_ITEMS : PAGE;
+  const { data, error } = useQuery(`maintain-browse:${url.q}:${url.offset}:${url.meaning}:${limit}`, async (a) => {
+    if (!split?.words) return a.maintain.browse({ q: url.q, offset: url.offset, limit });
     const hits = await a.semanticSearch(split.words);
     if (!hits.length) return { rows: [], total: 0, offset: 0, limit: PAGE, unknown: [], presets: null, facets: null };
     return a.maintain.browse({ q: split.rest, refs: hits.map(refOf), offset: url.offset, limit: PAGE });
@@ -550,7 +695,7 @@ export function ItemsView(_: ViewProps) {
     const items = itemsIn(e.clipboardData.getData("text"), project ?? undefined);
     if (!items.length) return;
     e.preventDefault();
-    const q = itemsTerm(items);
+    const q = itemsTerm(items, ownerOfRepo);
     setTyped(q);
     set(q);
   };
@@ -564,9 +709,11 @@ export function ItemsView(_: ViewProps) {
     for (const r of refs) if (on) next.add(r); else next.delete(r);
     select(next);
   };
+  /** Focus for when the control that had it goes away: the reply toggle, the Select all box, or the page heading. */
+  const refocus = () => requestAnimationFrame(() => (document.getElementById("items-command-reply-toggle") ?? selectAllBox.current ?? heading.current)?.focus());
   const clear = () => {
     select(new Set());
-    selectAllBox.current?.focus();
+    requestAnimationFrame(() => (selectAllBox.current ?? heading.current)?.focus());
   };
   // The items the command ran on leave the selection; those it refused or could not read stay ticked. The reply lines are the
   // announcement, so the selection's live region goes quiet.
@@ -581,27 +728,33 @@ export function ItemsView(_: ViewProps) {
     const ok = r.items.length > 0 && ran.size === r.items.length;
     setReply({ lines: r.lines, ok });
     if (ok) setCmd("");
+    // Every item ran, so the selection is empty and the command input goes away.
+    if (ran.size && ran.size >= picked.size) refocus();
   };
   const barShown = writes && (picked.size > 0 || !!reply);
 
-  return (
-    <div className="flex h-full flex-col">
+  const list = (
+    <div className="flex h-full min-w-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-[1100px] flex-col gap-3 px-4 pb-6 pt-5 md:px-6">
-          <h1 className="text-xl font-semibold">{t("Items")}</h1>
+        <div className="mx-auto flex max-w-[1180px] flex-col gap-3 px-4 pb-6 pt-5 md:px-6">
+          <h1 ref={heading} tabIndex={-1} className="text-xl font-semibold outline-none">
+            {t("Items")}
+          </h1>
           <p aria-live="polite" className="sr-only">
             {announced}
           </p>
 
-          <div className="flex gap-2">
-            <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap gap-2">
+            <div className="min-w-0 flex-1 basis-48">
               <SearchField value={typed} onChange={setTyped} onSubmit={(v) => set(v)} onPaste={paste} label={t("Search items")} placeholder={t("Words, refs or links, or is:open label:bug")} />
             </div>
-            <MatchToggle meaning={url.meaning} onChange={(m) => url.go({ meaning: m })} className="max-md:hidden" />
-            <Button icon={FunnelIcon} aria-expanded={filtersOpen} aria-controls="items-filters" onClick={() => setFiltersOpen(!filtersOpen)} className="max-md:h-11">
+            <span className="flex shrink-0 items-center gap-2">
+              <MatchToggle meaning={url.meaning} onChange={(m) => url.go({ meaning: m })} className="max-md:hidden" />
+              <Button icon={FunnelIcon} aria-expanded={filtersOpen} aria-controls="items-filters" onClick={() => setFiltersOpen(!filtersOpen)} className="max-md:h-11">
               {t("Filters")}
               {active.count > 0 && <span className="num rounded-full bg-ink/10 px-1.5 text-2xs leading-4">{active.count}</span>}
-            </Button>
+              </Button>
+            </span>
           </div>
 
           {active.chips.length > 0 && (
@@ -626,13 +779,7 @@ export function ItemsView(_: ViewProps) {
             </div>
           )}
 
-          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:thin] md:-mx-6 md:px-6" role="group" aria-label={t("Views")}>
-            {PRESETS.map((p) => (
-              <Chip key={p.id} ref={preset?.id === p.id ? activeChip : undefined} active={preset?.id === p.id} className="shrink-0 max-md:h-11" count={counts?.presets ? num(counts.presets[p.id] ?? 0) : undefined} onClick={() => set(p.query)}>
-                {t(p.label)}
-              </Chip>
-            ))}
-          </div>
+          <ViewChips picked={preset?.id ?? null} counts={counts?.presets ?? null} onPick={set} />
 
           {data && data.unknown.length > 0 && <p className="text-sm text-warn">{t("Not applied: {terms}", { terms: data.unknown.join(" ") })}</p>}
           <div className="flex min-h-8 items-center justify-between gap-2 text-sm text-ink/70">
@@ -653,6 +800,11 @@ export function ItemsView(_: ViewProps) {
           ) : (
             <div className="rounded-lg border border-line bg-panel">
               {writes && <SelectAll refs={data.rows.filter((r) => user.runRepos.includes(r.repo)).map(refOf)} picked={picked} onPick={pick} boxRef={selectAllBox} />}
+              {openRow && (
+                <span id={ROW_HINT} hidden>
+                  {t("Enter opens it beside the list")}
+                </span>
+              )}
               <ul className="divide-y divide-line" aria-label={preset ? t(preset.label) : t("Items")} onKeyDown={(e) => listKey(e, openRow)}>
                 {data.rows.map((r) => (
                   <Row
@@ -665,6 +817,7 @@ export function ItemsView(_: ViewProps) {
                     may={user.runRepos.includes(r.repo)}
                     onPick={(on) => pick([refOf(r)], on)}
                     onOpen={openRow && ((keyboard) => openRow(refOf(r), keyboard))}
+                    phone={phone}
                   />
                 ))}
               </ul>
@@ -673,7 +826,24 @@ export function ItemsView(_: ViewProps) {
           )}
         </div>
       </div>
-      {barShown && <CommandBar text={cmd} setText={setCmd} items={[...picked]} onClear={clear} onDone={done} reply={reply} onCloseReply={() => setReply(null)} />}
+      {barShown && <CommandBar text={cmd} setText={setCmd} items={[...picked]} onClear={clear} onDone={done} reply={reply} onCloseReply={() => { setReply(null); refocus(); }} />}
     </div>
+  );
+  if (phone) return list;
+  // Desktop: the item panel shows beside the list only while an item is open; the list stays mounted, so it keeps its scroll.
+  return (
+    <PanelGroup direction="horizontal" className="h-full">
+      <Panel id="list" order={0} minSize={36} className="min-w-0">
+        {list}
+      </Panel>
+      {url.opened && (
+        <>
+          <ResizeHandle label={t("Resize item panel")} />
+          <Panel id="item" order={1} defaultSize={panelWidth} minSize={28} maxSize={64} onResize={(size) => storage.setItem(PANEL_WIDTH, String(Math.round(size * 10) / 10))} className="min-w-0 border-l border-line">
+            <ItemPanel {...props} />
+          </Panel>
+        </>
+      )}
+    </PanelGroup>
   );
 }

@@ -2,7 +2,7 @@
 // conversation in two tabs. Escape inside the panel closes it; the title opens the full item page.
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { ChatsIcon, XIcon } from "@phosphor-icons/react";
+import { XIcon } from "@phosphor-icons/react";
 import { t } from "../../../../../src/i18n/index.ts";
 import { useApi, useQuery } from "../../../api/client";
 import type { ViewProps } from "../../../registry/types";
@@ -10,7 +10,6 @@ import { useItemChat, useItemPage } from "../../../lib/hooks";
 import { itemPath } from "../../../lib/links";
 import { itemChatStatus } from "../../../lib/status";
 import { usePref } from "../../../shell/layoutStorage";
-import { EmptyState } from "../../../ui/atoms/EmptyState";
 import { GithubButton } from "../../../ui/atoms/GithubButton";
 import { ItemIcon } from "../../../ui/atoms/ItemIcon";
 import { Pending } from "../../../ui/atoms/Pending";
@@ -19,31 +18,21 @@ import { Tabs } from "../../../ui/molecules/Tabs";
 import { GithubSide } from "../../../ui/organisms/GithubSide";
 import { ItemChatPane } from "../../../ui/organisms/ItemChatPane";
 import { ItemHolds } from "../../../ui/organisms/ItemHolds";
-import { OPEN_PARAM, openItemKey, parseOpenItem, type OpenItemState } from "./openItem";
+import { OPEN_PARAM, openItemKey, parseOpenItem, useCloseItem, type OpenItemState } from "./openItem";
 
 type Tab = "autocraft" | "github";
 const TABS: Tab[] = ["autocraft", "github"];
 const ID = "item-panel";
 
 export function ItemPanel({ user }: ViewProps) {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
+  const closeItem = useCloseItem();
   const open = parseOpenItem(params.get(OPEN_PARAM));
-  if (!open)
-    return (
-      <div className="flex h-full items-center justify-center">
-        <EmptyState icon={ChatsIcon}>{t("Pick an item to see its conversation")}</EmptyState>
-      </div>
-    );
+  // The Items view shows the panel only while an item is open.
+  if (!open) return null;
   const close = () => {
     const key = openItemKey(open.repo, open.number);
-    setParams(
-      (p) => {
-        const n = new URLSearchParams(p);
-        n.delete(OPEN_PARAM);
-        return n;
-      },
-      { replace: true },
-    );
+    closeItem();
     // The row that opened the item takes focus back, when the list still shows it.
     requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-open-item="${CSS.escape(key)}"]`)?.focus());
   };
@@ -128,6 +117,7 @@ function OpenItem({ repo, number, login, onClose }: { repo: string; number: numb
             {...(chat.error ? { error: chat.error } : {})}
             holds={<ItemHolds m={m} onControl={(b) => api.maintainItem.control(b)} />}
             onSend={chat.send}
+            draftKey={`items-panel:${ref}`}
             onWithdraw={chat.withdraw}
             onEvent={(id) => nav(`${itemPath(repo, number)}?event=${encodeURIComponent(id)}`)}
             onGithub={() => {

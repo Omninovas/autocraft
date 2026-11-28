@@ -2,7 +2,8 @@
 // Rows open an item with `useOpenItem()` and carry `openItemAttrs(repo, number)` on their focusable element, so closing the
 // panel returns focus to the row.
 import { useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { useLiveLocation } from "../../../lib/hooks";
 import { shortRepo } from "../../../lib/links";
 
 export const OPEN_PARAM = "open";
@@ -23,22 +24,39 @@ export function parseOpenItem(v: string | null): { repo: string; number: number 
 /** Marks a row's focusable element as the one that opens this item. */
 export const openItemAttrs = (repo: string, number: number) => ({ "data-open-item": openItemKey(repo, number) });
 
+/** Search parameters as text, with `:`, `,` and `/` left readable: `?q=is:open+label:bug&open=photocraft/12`. */
+export const readableSearch = (p: URLSearchParams): string => p.toString().replace(/%3A/gi, ":").replace(/%2C/gi, ",").replace(/%2F/gi, "/");
+
+/** Navigates to this page with `edit` applied to its parameters, written readably, replacing the history entry. */
+function useEditParams() {
+  const navigate = useNavigate();
+  const live = useLiveLocation();
+  return useCallback(
+    (edit: (p: URLSearchParams) => void, state?: OpenItemState) => {
+      const { pathname, search } = live();
+      const p = new URLSearchParams(search);
+      edit(p);
+      const s = readableSearch(p);
+      navigate({ pathname, search: s ? `?${s}` : "" }, { replace: true, ...(state ? { state } : {}) });
+    },
+    [navigate, live],
+  );
+}
+
 /**
  * Opens an item in the panel, keeping the rest of the query. `keyboard`: the row was opened with Enter, so focus moves to the
  * panel's heading.
  */
 export function useOpenItem() {
-  const [, setParams] = useSearchParams();
+  const edit = useEditParams();
   return useCallback(
-    (repo: string, number: number, how: { keyboard?: boolean } = {}) =>
-      setParams(
-        (p) => {
-          const n = new URLSearchParams(p);
-          n.set(OPEN_PARAM, openItemKey(repo, number));
-          return n;
-        },
-        { replace: true, ...(how.keyboard ? { state: { focusItemPanel: true } satisfies OpenItemState } : {}) },
-      ),
-    [setParams],
+    (repo: string, number: number, how: { keyboard?: boolean } = {}) => edit((p) => p.set(OPEN_PARAM, openItemKey(repo, number)), how.keyboard ? { focusItemPanel: true } : undefined),
+    [edit],
   );
+}
+
+/** Closes the panel, keeping the rest of the query. */
+export function useCloseItem() {
+  const edit = useEditParams();
+  return useCallback(() => edit((p) => p.delete(OPEN_PARAM)), [edit]);
 }

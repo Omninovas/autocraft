@@ -46,7 +46,8 @@ export async function browse(db: Db, req: Req): Promise<BrowseResult> {
   const withPresets = req.query.get("presets") === "1";
   const refs = req.query.has("refs") ? (req.query.get("refs") ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, REFS_MAX) : undefined;
   if (refs?.some((r) => !/^[^#\s]+#\d+$/.test(r))) throw new HttpError(400, "refs must be repo#number");
-  const [repos, hidden, insiders] = await Promise.all([visibleRepos(db, req), hiddenRepos(db, req), loadInsiders(db)]);
+  // Viewers see the team as GitHub's associations say: AutoCraft's roles are not theirs to learn.
+  const [repos, hidden, insiders] = await Promise.all([visibleRepos(db, req), hiddenRepos(db, req), staff ? loadInsiders(db) : Promise.resolve(new Set<string>())]);
   const scope: BrowseScope = { repos, hidden, staff, login: req.user.login || null, insiders: [...insiders] };
   const presets = PRESETS.map((p) => ({ id: p.id, query: forReader(parseItemQuery(p.query), staff) }));
   const [page, counts, facets] = await db.together(() => Promise.all([

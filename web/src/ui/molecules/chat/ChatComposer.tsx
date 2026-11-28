@@ -5,9 +5,19 @@ import { t } from "../../../../../src/i18n/index.ts";
 import { ErrorLine } from "../../atoms/ErrorLine";
 import { Textarea } from "../../atoms/Textarea";
 
-/** `blocked`: why the reader cannot write here; the box is then disabled and says why. */
-export function ChatComposer({ open, blocked, onSend }: { open: boolean; blocked?: string | null; onSend: (text: string) => Promise<void> }) {
-  const [text, setText] = useState("");
+/** Unsent text by `draftKey`, for this page session: a composer that unmounts with its item keeps its draft. */
+const drafts = new Map<string, string>();
+
+/**
+ * `blocked`: why the reader cannot write here; the box is then disabled and says why. `draftKey`: unsent text is kept under it.
+ * Escape in a box with text keeps the text and goes no further, so a panel around it does not close.
+ */
+export function ChatComposer({ open, blocked, onSend, draftKey }: { open: boolean; blocked?: string | null; onSend: (text: string) => Promise<void>; draftKey?: string }) {
+  const [text, setTextState] = useState(() => (draftKey ? drafts.get(draftKey) ?? "" : ""));
+  const setText = (v: string) => {
+    setTextState(v);
+    if (draftKey) v ? drafts.set(draftKey, v) : drafts.delete(draftKey);
+  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
@@ -39,6 +49,7 @@ export function ChatComposer({ open, blocked, onSend }: { open: boolean; blocked
             placeholder={blocked ?? (open ? t("Reply yes, or say what to do instead…") : t("Reply to AutoCraft…"))}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
+              if (e.key === "Escape" && text) e.preventDefault();
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 void send();

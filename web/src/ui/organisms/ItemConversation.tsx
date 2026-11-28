@@ -89,11 +89,13 @@ interface Props {
   blockedReason?: string;
   /** Rows with their own controls (holds, paused steps), right above the composer. */
   notice?: ReactNode;
+  /** Keeps the composer's unsent text under this key (ChatComposer). */
+  draftKey?: string;
   /** Withdraws the reader's message that waits for Opus; rejects with the reason it failed. */
   onWithdraw?: () => Promise<void>;
 }
 
-export function ItemConversation({ c, onSend, onEvent, onGithub, blockedReason, notice, onWithdraw }: Props) {
+export function ItemConversation({ c, onSend, onEvent, onGithub, blockedReason, notice, onWithdraw, draftKey }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const listEl = useRef<HTMLOListElement>(null);
   const atBottom = useRef(true);
@@ -243,7 +245,7 @@ export function ItemConversation({ c, onSend, onEvent, onGithub, blockedReason, 
         </div>
       )}
       {notice}
-      <ChatComposer open={!!c.open} blocked={c.canReply ? null : (blockedReason ?? t("You can reply when you have write access to this repository"))} onSend={send} />
+      <ChatComposer open={!!c.open} blocked={c.canReply ? null : (blockedReason ?? t("You can reply when you have write access to this repository"))} onSend={send} {...(draftKey ? { draftKey } : {})} />
     </div>
   );
 }

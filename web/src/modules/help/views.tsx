@@ -120,7 +120,7 @@ function Start() {
             {t("Reply to a message with")} <Code>@AutoCraft status</Code> {t("for the status of the items it names, or name items after it; anyone may ask.")}
           </li>
           <li>{t("Your agent: the AutoCraft tools take the same words.")}</li>
-          <li>{t("This app: the chat on an item's page, or Command on Items.")}</li>
+          <li>{t("This app: the chat on an item's page, or the command bar on Items after ticking items.")}</li>
         </ul>
       </Part>
     </Page>
@@ -233,7 +233,10 @@ function Commands() {
       </Part>
       <Part title={t("Several items")}>
         <p>
-          {t("On Discord, in an agent and in this app, write them inline:")} <Code>merge photocraft#803 photocraft#19</Code>, {t("or as a list after a colon:")} <Code>merge, urgent: photocraft#803 #19</Code>. {t("A bare number takes the repo before it. Each item gets its own answer line. A GitHub comment acts only on the item it is written on.")}
+          {t("On Discord and in an agent, write them inline:")} <Code>merge photocraft#803 photocraft#19</Code>, {t("or as a list after a colon:")} <Code>merge, urgent: photocraft#803 #19</Code>. {t("A bare number takes the repo before it. Each item gets its own answer line. A GitHub comment acts only on the item it is written on.")}
+        </p>
+        <p>
+          {t("In this app, tick the items on Items, or paste text with refs or links into its search box to list exactly those items and tick them with Select all shown, then write only the command's words in the command bar:")} <Code>review and merge</Code>.
         </p>
       </Part>
       <Part title={t("More commands")}>

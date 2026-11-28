@@ -24,10 +24,10 @@ export function TutorialStep({ id, n, title, done, refs, children }: {
         <span aria-hidden className={cn("num flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold", done ? "bg-ok/15 text-ok" : "bg-ink/[0.07] text-ink/70")}>
           {done ? <CheckCircleIcon weight="bold" /> : n}
         </span>
-        <h2 id={head} className="text-md font-semibold">
+        <h3 id={head} className="text-md font-semibold">
           <span className="sr-only">{t("Step {n}:", { n })} </span>
           {title}
-        </h2>
+        </h3>
         {done !== undefined &&
           (done ? (
             <Badge tone="ok" icon={<CheckCircleIcon aria-hidden weight="bold" />}>{t("Done")}</Badge>

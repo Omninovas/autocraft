@@ -1,4 +1,4 @@
-// Help → Get started: the steps a new maintainer goes through, each with a link to its reference page. The sample replies come
+// Help → Get started: what a new maintainer sets up and needs to know, as steps and bullets, each with a link to its reference page. The sample replies come
 // from the workflow's own parser and confirmation (src/workflow), so they read as AutoCraft answers.
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -32,7 +32,6 @@ const ITEMS = [
   { number: 19, title: "Speed up the brush preview on large canvases" },
 ];
 const SAID = "review and merge";
-const MAIN = COMMANDS.filter((c) => !c.more);
 
 /** What AutoCraft answers `text` with on an item nobody started, read and resolved as the server does. */
 function confirmation(text: string, kind: ItemKind = "pr"): string {
@@ -57,6 +56,18 @@ function statusLines(): { head: string; rest: string[] } {
 const Code = ({ children }: { children: ReactNode }) => <code className="code rounded bg-ink/[0.07] px-1 py-0.5 text-[0.9em]">{children}</code>;
 const ref = (n: number) => `${REPO}#${n}`;
 const linkCls = "rounded text-accent-ink underline underline-offset-2";
+const A = ({ to, children }: { to: string; children: ReactNode }) => <Link to={to} className={linkCls}>{children}</Link>;
+
+/** A procedure: numbered, one action per line. */
+const Steps = ({ children }: { children: ReactNode }) => <ol className="flex list-decimal flex-col gap-2 pl-6 marker:text-ink/60">{children}</ol>;
+/** Facts: one per bullet. */
+const Bullets = ({ children }: { children: ReactNode }) => <ul className="flex list-disc flex-col gap-1.5 pl-5 marker:text-ink/50">{children}</ul>;
+/** `term`: what it does, one line. */
+const Term = ({ term, children }: { term: ReactNode; children: ReactNode }) => (
+  <li>
+    <span className="font-semibold">{term}</span>: {children}
+  </li>
+);
 
 type Harness = "linux" | "mac" | "codex";
 const HARNESS: Record<Harness, string> = {
@@ -67,38 +78,52 @@ const HARNESS: Record<Harness, string> = {
 
 function RunnerStep({ done }: { done?: boolean }) {
   const [harness, setHarness] = useState<Harness>(typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent) ? "mac" : "linux");
-  const text = [HARNESS[harness], "autocraft doctor", "autocraft service install"].join("\n");
   return (
-    <TutorialStep id="runner" n={2} title={t("Connect a Task Runner")} done={done} refs={[{ to: "/connect/setup", label: t("Setup guide") }, { to: "/runner", label: t("Runner page") }, { to: "/help/start", label: t("Overview") }]}>
-      <p>{t("Model work runs on Task Runners: maintainers' own machines, on their own Claude or Codex subscription. What you start and what you ask the model runs on yours.")}</p>
-      <p>
-        {t("Install the runner with the first command of the")}{" "}
-        <Link to="/connect/setup" className={linkCls}>{t("Setup guide")}</Link>
-        {t(". It logs the runner in to this server: open the link it prints and approve the code. Then pick the model login if setup did not, check the runner and keep it running:")}
-      </p>
-      <Segmented label={t("Model login")} value={harness} onChange={(v) => setHarness(v as Harness)} options={[{ value: "linux", label: t("Claude on Linux") }, { value: "mac", label: t("Claude on macOS") }, { value: "codex", label: "Codex" }]} />
-      <CodeBlock compact title={t("Task Runner commands")} text={text} />
-      <p>
-        <Code>autocraft work</Code> {t("runs it in a terminal instead of as a service.")}
-      </p>
-      <p>
-        {t("On the")} <Link to="/runner" className={linkCls}>{t("Runner page")}</Link>, {t("My settings decide what it takes:")}
-      </p>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-        <dt className="font-semibold">{t("Manual only")}</dt>
-        <dd>{t("only what you start or pick")}</dd>
-        <dt className="font-semibold">{t("My repos, task kinds")}</dt>
-        <dd>{t("the other work it may take")}</dd>
-        <dt className="font-semibold">{t("Keep free")}</dt>
-        <dd>{t("the share of your 5-hour and weekly plan usage it leaves unused")}</dd>
-        <dt className="font-semibold">{t("Max calls at once")}</dt>
-        <dd>{t("the most calls all your runners run together")}</dd>
-      </dl>
-      <p>
-        {t("Open your runner's row on the")} <Link to="/connect" className={linkCls}>{t("Connect page")}</Link> {t("to rename it, set its access, or see its calls on the")}{" "}
-        <Link to="/agents" className={linkCls}>{t("Agents page")}</Link>.
-      </p>
-      {done === false && <p className="text-sm text-ink/70">{t("Done when one of your Task Runners is connected and ready.")}</p>}
+    <TutorialStep id="runner" n={1} title={t("Connect a Task Runner")} done={done} refs={[{ to: "/connect/setup", label: t("Setup guide") }, { to: "/help/start", label: t("Overview") }]}>
+      <Bullets>
+        <li>{t("Model work runs on your own machine, with your Claude or Codex subscription.")}</li>
+      </Bullets>
+      <Steps>
+        <li>
+          {t("Run the first command of the")} <A to="/connect/setup">{t("Setup guide")}</A>. {t("It installs the runner and logs it in.")}
+        </li>
+        <li>{t("Open the link it prints and approve the code.")}</li>
+        <li>
+          <div className="flex flex-col gap-1.5">
+            <span>{t("If setup did not pick a model login, pick one:")}</span>
+            <Segmented label={t("Model login")} value={harness} onChange={(v) => setHarness(v as Harness)} options={[{ value: "linux", label: t("Claude on Linux") }, { value: "mac", label: t("Claude on macOS") }, { value: "codex", label: "Codex" }]} />
+            <CodeBlock compact title={t("Model login")} text={HARNESS[harness]} />
+          </div>
+        </li>
+        <li>
+          {t("Check it:")} <Code>autocraft doctor</Code>
+        </li>
+        <li>
+          {t("Keep it running:")} <Code>autocraft service install</Code>, {t("or")} <Code>autocraft work</Code> {t("in a terminal.")}
+        </li>
+        <li>
+          <div className="flex flex-col gap-1.5">
+            <span>
+              {t("Choose what it takes, under My settings on the")} <A to="/runner">{t("Runner page")}</A>:
+            </span>
+            <Bullets>
+              <Term term={t("Manual only")}>{t("only what you start or pick")}</Term>
+              <Term term={t("My repos, task kinds")}>{t("narrow the other work")}</Term>
+              <Term term={t("Keep free")}>{t("plan usage it leaves unused, 5-hour and weekly")}</Term>
+              <Term term={t("Max calls at once")}>{t("calls all your runners run together")}</Term>
+            </Bullets>
+          </div>
+        </li>
+        <li>
+          {t("Rename it on its row on the")} <A to="/connect">{t("Connect page")}</A>.
+        </li>
+      </Steps>
+      <Bullets>
+        <li>{t("Done when one of your Task Runners is connected and ready.")}</li>
+        <li>
+          {t("Its calls:")} <A to="/agents">{t("Agents")}</A>
+        </li>
+      </Bullets>
     </TutorialStep>
   );
 }
@@ -106,52 +131,115 @@ function RunnerStep({ done }: { done?: boolean }) {
 function DiscordStep({ check }: { check?: SetupCheck }) {
   const [linking, setLinking] = useState(false);
   return (
-    <TutorialStep id="discord" n={3} title={t("Link Discord")} done={check?.done} refs={[{ to: "/help/start", label: t("Overview") }]}>
-      <p>
-        {t("Link your Discord account, so")} <Code>@AutoCraft</Code> {t("and")} <Code>/autocraft do</Code> {t("act as you. Link Discord shows a code; run the command it shows in Discord:")}
-      </p>
-      <p>
-        <Code>/autocraft account action:link code:…</Code>
-      </p>
-      {check && !check.done && (
-        <>
-          <Button variant="primary" className="w-fit max-md:h-11" onClick={() => setLinking(true)}>{t("Link Discord")}</Button>
-          <LinkDiscordDialog open={linking} linked={check.done} onClose={() => setLinking(false)} />
-        </>
-      )}
+    <TutorialStep id="discord" n={2} title={t("Link Discord")} done={check?.done} refs={[{ to: "/help/start", label: t("Overview") }]}>
+      <Steps>
+        <li>
+          <div className="flex flex-col gap-1.5">
+            <span>
+              {t("Press Link Discord, here or on the")} <A to="/runner">{t("Runner page")}</A>.
+            </span>
+            {check && !check.done && (
+              <>
+                <Button variant="primary" className="w-fit max-md:h-11" onClick={() => setLinking(true)}>{t("Link Discord")}</Button>
+                <LinkDiscordDialog open={linking} linked={check.done} onClose={() => setLinking(false)} />
+              </>
+            )}
+          </div>
+        </li>
+        <li>
+          {t("In Discord, run the command it shows:")} <Code>/autocraft account action:link code:…</Code>
+        </li>
+      </Steps>
+      <Bullets>
+        <li>{t("The code works once, until the time the dialog shows.")}</li>
+        <li>
+          {t("After that,")} <Code>@AutoCraft</Code> {t("and")} <Code>/autocraft do</Code> {t("act as you.")}
+        </li>
+      </Bullets>
     </TutorialStep>
   );
 }
 
-function Commands({ mention }: { mention: string }) {
+function HowStep() {
+  return (
+    <TutorialStep id="how" n={3} title={t("How AutoCraft works")} refs={[{ to: "/help/workflows", label: t("Workflows") }, { to: "/help/after", label: t("After a command") }]}>
+      <Bullets>
+        <li>{t("Nothing runs on an item until someone sends a command.")}</li>
+        <li>{t("Exception: small and medium bug fixes from contributors with a good merge history.")}</li>
+        <li>
+          <Code>merge</Code> {t("approves the merge, like pressing the merge button.")}
+        </li>
+        <li>{t("Approved: AutoCraft reviews, fixes and merges in your name on green CI.")}</li>
+        <li>{t("It comes back to you only when it cannot get there.")}</li>
+        <li>{t("Not approved: it comes back with one recommendation.")}</li>
+      </Bullets>
+    </TutorialStep>
+  );
+}
+
+function CommandsStep() {
+  return (
+    <TutorialStep id="commands" n={4} title={t("Commands")} refs={[{ to: "/help/commands", label: t("Commands") }]}>
+      <Bullets>
+        <li>{t("The same words on GitHub, Discord, your agent and here.")}</li>
+        <li>
+          {t("Combine them:")} <Code>review and merge</Code>, <Code>fix 1, drop 2, then merge</Code>
+        </li>
+      </Bullets>
+      <ul aria-label={t("Commands")} className="flex flex-col divide-y divide-line rounded-md border border-line text-sm">
+        {COMMANDS.map((c) => (
+          <li key={c.word} className="grid gap-x-3 px-3 py-1.5 sm:grid-cols-[11rem_1fr]">
+            <Link to={c.more ? "/help/commands" : `/help/commands#cmd-${c.word.split(" ")[0]}`} className="code w-fit rounded text-accent-ink hover:underline">
+              {c.usage}
+            </Link>
+            <span>{t(c.short)}</span>
+          </li>
+        ))}
+        {WEIGHT_HELP.filter((w) => w.word !== "(none)").map((w) => (
+          <li key={w.word} className="grid gap-x-3 px-3 py-1.5 sm:grid-cols-[11rem_1fr]">
+            <span className="code">{w.word}</span>
+            <span>{t("Weight {weight}", { weight: t(w.weight) })}</span>
+          </li>
+        ))}
+      </ul>
+    </TutorialStep>
+  );
+}
+
+function AnswerStep() {
+  return (
+    <TutorialStep id="answer" n={5} title={t("Answering AutoCraft")} refs={[{ to: "/help/after", label: t("After a command") }, { to: "/help/examples", label: t("Examples") }]}>
+      <Bullets>
+        <Term term={<><Code>yes</Code>, <Code>approve</Code>, <Code>lgtm</Code></>}>{t("run the recommendation")}</Term>
+        <Term term={t("Anything else")}>{t("what to do instead, in your own words")}</Term>
+        <Term term={<><Code>hold</Code>, <Code>stop</Code>, <Code>pause</Code></>}>{t("halt the item at once")}</Term>
+        <li>{t("Unclear text runs nothing; AutoCraft says what it understood.")}</li>
+        <li>{t("Every accepted command gets one confirmation line.")}</li>
+      </Bullets>
+    </TutorialStep>
+  );
+}
+
+function WhereStep({ mention }: { mention: string }) {
   const one = confirmation(SAID);
   const status = statusLines();
   const many = ITEMS.map((i) => `${ref(i.number)}: ${confirmation(`${SAID} ${ref(i.number)}`)}`);
   const said: Extract<ChatEntry, { t: "said" }> = { t: "said", id: "s1", at: AT, login: WHO, via: "dashboard", body: SAID, url: null };
   const confirmed: Extract<ChatEntry, { t: "reply" }> = { t: "reply", id: "c1", at: AT, body: one, findings: [], ask: null };
   return (
-    <TutorialStep id="commands" n={4} title={t("Send a command")} refs={[{ to: "/help/commands", label: t("Commands") }, { to: "/help/after", label: t("After a command") }, { to: "/help/examples", label: t("Examples") }]}>
-      <p>{t("The same words work on GitHub, on Discord, in your agent and here. Combine them in one message.")}</p>
-      <ul aria-label={t("Commands")} className="flex flex-wrap gap-1.5">
-        {MAIN.map((c) => (
-          <li key={c.word}>
-            <Link to={`/help/commands#cmd-${c.word.split(" ")[0]}`} className="code inline-flex h-8 items-center rounded border border-line px-2.5 text-sm hover:bg-ink/[0.06] max-md:h-11">
-              {c.word}
-            </Link>
-          </li>
-        ))}
-      </ul>
-      <p>
-        {t("A weight orders the queues:")} {WEIGHT_HELP.filter((w) => w.word !== "(none)").map((w, i) => <span key={w.word}>{i > 0 && ", "}<Code>{w.word}</Code></span>)}.
-      </p>
-      <p>
-        {t("When AutoCraft asks, answer in your own words:")} <Code>yes</Code>, <Code>approve</Code> {t("or")} <Code>lgtm</Code> {t("run its recommendation; anything else says what to do instead.")}{" "}
-        <Code>hold</Code> {t("(or stop, pause, wait) halts the item at once. When AutoCraft is not sure what you mean, nothing runs and it says what it understood.")}
-      </p>
-      <p>{t("Every accepted command gets one line back, the same on every surface:")}</p>
+    <TutorialStep id="where" n={6} title={t("Where to send them")} refs={[{ to: "/help/start", label: t("Overview") }]}>
+      <Bullets>
+        <Term term="GitHub">
+          {t("a comment on the item:")} <Code>@{mention} {SAID}</Code>
+        </Term>
+        <Term term="Discord">
+          <Code>/autocraft do</Code> {t("(private reply) or")} <Code>@AutoCraft</Code> {t("(reply in a thread)")}
+        </Term>
+        <Term term="AutoCraft">{t("tick items on Items, or write in an item's chat")}</Term>
+      </Bullets>
       <div className="grid gap-4 lg:grid-cols-2">
         <CommentThreadMock
-          label={t("On GitHub")}
+          label={t("On GitHub: your comment, the reply, the status comment")}
           title={
             <span className="flex items-start gap-2">
               <ItemIcon kind="pr" state="open" tip={false} />
@@ -178,7 +266,7 @@ function Commands({ mention }: { mention: string }) {
           ]}
         />
         <ChannelMock
-          label={t("On Discord")}
+          label={t("On Discord: the slash command and its private reply")}
           channel={REPO}
           messages={[
             {
@@ -189,19 +277,12 @@ function Commands({ mention }: { mention: string }) {
                 </p>
               ),
             },
-            { author: "AutoCraft", tag: t("bot"), when: "09:30", body: <p>{one}</p>, note: t("A private reply: only {login} sees it.", { login: WHO }) },
+            { author: "AutoCraft", tag: t("bot"), when: "09:30", body: <p>{one}</p>, note: t("Only {login} sees it.", { login: WHO }) },
           ]}
         />
-      </div>
-      <p className="text-sm">
-        {t("On GitHub the comment starts with the app's name and acts on that item; AutoCraft keeps one status comment up to date. On Discord, mentioning the bot works too:")}{" "}
-        <Code>@AutoCraft {SAID} {ref(ITEMS[0]!.number)}</Code>. {t("It answers in a thread, where a command that names no item acts on the thread's items.")}
-      </p>
-      <figure className="flex min-w-0 flex-col gap-2">
-        <figcaption className="text-sm font-semibold">{t("In AutoCraft")}</figcaption>
-        <div className="grid gap-4 lg:grid-cols-2">
+        <figure className="flex min-w-0 flex-col gap-2">
+          <figcaption className="text-sm font-semibold">{t("On Items: tick rows, type only the words")}</figcaption>
           <div className="flex min-w-0 flex-col gap-2 rounded-md border border-line p-3">
-            <p className="text-sm text-ink/70">{t("Items: tick the rows; the command box opens. Type only the words: each ticked item gets the command.")}</p>
             <div className="flex flex-col gap-2 rounded-lg border border-line-strong bg-raised p-3">
               <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                 <span className="font-medium">{t("Command")}</span>
@@ -223,17 +304,17 @@ function Commands({ mention }: { mention: string }) {
               ))}
             </ul>
           </div>
-          <div className="flex min-w-0 flex-col gap-2 rounded-md border border-line p-3">
-            <p className="text-sm text-ink/70">{t("An item's page: type in its chat.")}</p>
-            <ol aria-label={t("Sample chat")} className="flex flex-col gap-4">
-              <ChatBubble e={said} />
-              <AutoCraftTurn at={confirmed.at} text={confirmed.body}>
-                <AutoCraftMessage e={confirmed} open={false} />
-              </AutoCraftTurn>
-            </ol>
-          </div>
-        </div>
-      </figure>
+        </figure>
+        <figure className="flex min-w-0 flex-col gap-2">
+          <figcaption className="text-sm font-semibold">{t("On an item's page: write in its chat")}</figcaption>
+          <ol aria-label={t("Sample chat")} className="flex flex-col gap-4 rounded-md border border-line p-3">
+            <ChatBubble e={said} />
+            <AutoCraftTurn at={confirmed.at} text={confirmed.body}>
+              <AutoCraftMessage e={confirmed} open={false} />
+            </AutoCraftTurn>
+          </ol>
+        </figure>
+      </div>
     </TutorialStep>
   );
 }
@@ -245,16 +326,25 @@ function TalkStep() {
     body: t("The preview encoder converts to RGB before writing the PNG (`preview/encode.rs`, line 88). Writing RGBA there keeps the alpha channel; the full export already does that."),
   };
   return (
-    <TutorialStep id="talk" n={5} title={t("Ask the model about an item")} refs={[{ to: "/help/after", label: t("After a command") }, { to: "/help/roles", label: t("Who can do what") }]}>
-      <p>{t("Ask a question in an item's chat, with a question mark. Opus answers there. It reads the item, the chat so far and the repository's code, and changes nothing.")}</p>
-      <p>{t("Your question runs on your own Task Runner, so it must be connected and ready. Everyone who can see the repository reads the answer. A message that is not a question is read as a command.")}</p>
-      <p>{t("Opus may recommend a command; nothing runs until someone sends it. Until Opus answers, you can withdraw your question.")}</p>
-      <ol aria-label={t("Sample chat")} className="flex flex-col gap-4 rounded-md border border-line p-3">
-        <ChatBubble e={question} />
-        <AutoCraftTurn at={answer.at} text={answer.body}>
-          <AutoCraftMessage e={answer} open={false} />
-        </AutoCraftTurn>
-      </ol>
+    <TutorialStep id="talk" n={7} title={t("Ask the model about an item")} refs={[{ to: "/help/roles", label: t("Who can do what") }]}>
+      <Bullets>
+        <li>{t("Write a question, with a question mark, in the item's chat.")}</li>
+        <li>{t("Opus reads the item, the chat and the repository's code; it changes nothing.")}</li>
+        <li>{t("It runs on your own Task Runner, which must be ready.")}</li>
+        <li>{t("Everyone who can see the repository reads the answer.")}</li>
+        <li>{t("It may recommend a command; nothing runs until someone sends it.")}</li>
+        <li>{t("You can withdraw the question until Opus answers.")}</li>
+        <li>{t("A message that is not a question is read as a command.")}</li>
+      </Bullets>
+      <figure className="flex min-w-0 flex-col gap-2">
+        <figcaption className="text-sm font-semibold">{t("A question and Opus's answer")}</figcaption>
+        <ol aria-label={t("Sample chat")} className="flex flex-col gap-4 rounded-md border border-line p-3">
+          <ChatBubble e={question} />
+          <AutoCraftTurn at={answer.at} text={answer.body}>
+            <AutoCraftMessage e={answer} open={false} />
+          </AutoCraftTurn>
+        </ol>
+      </figure>
     </TutorialStep>
   );
 }
@@ -266,47 +356,55 @@ function FollowStep() {
     </Link>
   );
   return (
-    <TutorialStep id="follow" n={6} title={t("Follow the work")} refs={[{ to: "/help/after", label: t("After a command") }, { to: "/help/workflows", label: t("Workflows") }]}>
-      <ul className="flex list-disc flex-col gap-1.5 pl-5">
-        <li>
-          <Link to="/" className={linkCls}>{t("Home")}</Link>: {t("your items with their last message; an item with a question for you is marked.")}
-        </li>
-        <li>
-          <Link to="/items" className={linkCls}>{t("Items")}</Link>: {t("search with qualifiers such as")} {q("is:draft")}, {q("is:ready")}, {q("is:asked")} {t("or")} {q("autocraft:waiting")}.
-        </li>
-        <li>
-          <Link to="/queue" className={linkCls}>{t("Work queue")}</Link>: {t("what runs, what waits and why.")}
-        </li>
-        <li>
-          <Link to="/agents" className={linkCls}>{t("Agents")}</Link>
-          {t(", in the sidebar: the model calls that are running, waiting and finished. A waiting call says why, such as no Task Runner ready or all of them busy.")}
-        </li>
-        <li>{t("An item's page: the chat, and beside it the GitHub and Events tabs with everything that happened to the item.")}</li>
-      </ul>
+    <TutorialStep id="follow" n={8} title={t("Follow the work")} refs={[{ to: "/help/after", label: t("After a command") }]}>
+      <Bullets>
+        <Term term={<A to="/">{t("Home")}</A>}>{t("your items and their last message; questions for you are marked")}</Term>
+        <Term term={<A to="/items">{t("Items")}</A>}>
+          {q("is:draft")}, {q("is:ready")}, {q("is:asked")}, {q("autocraft:waiting")}
+        </Term>
+        <Term term={<A to="/queue">{t("Work queue")}</A>}>{t("what runs, what waits and why")}</Term>
+        <Term term={<A to="/agents">{t("Agents")}</A>}>{t("model calls running, waiting and finished; why a call waits")}</Term>
+        <Term term={t("An item's page")}>{t("the chat, with GitHub and Events tabs beside it")}</Term>
+      </Bullets>
     </TutorialStep>
   );
 }
 
 function AgentStep() {
   return (
-    <TutorialStep id="agent" n={7} title={t("Use AutoCraft from your own agent")} refs={[{ to: "/connect", label: t("Connect") }]}>
-      <p>
-        {t("Make a token in the MCP Connector block of the")} <Link to="/connect" className={linkCls}>{t("Connect page")}</Link>
-        {t(". It shows the command that adds AutoCraft to Claude Code, and a config for other clients. Your agent then reads your items and questions, and with a token that may send commands, it sends the same commands as you.")}
-      </p>
+    <TutorialStep id="agent" n={9} title={t("Connect your own agent")} refs={[{ to: "/connect", label: t("Connect") }]}>
+      <Steps>
+        <li>
+          {t("Make a token in the MCP Connector block of the")} <A to="/connect">{t("Connect page")}</A>.
+        </li>
+        <li>{t("Run the command it shows to add AutoCraft to Claude Code, or use its config in another client.")}</li>
+      </Steps>
+      <Bullets>
+        <li>{t("Your agent reads your items and questions.")}</li>
+        <li>{t("With a token that may send commands, it sends them as you.")}</li>
+      </Bullets>
     </TutorialStep>
   );
 }
 
-const STEPS = [
-  ["intro", () => t("What AutoCraft does for you")],
-  ["runner", () => t("Connect a Task Runner")],
-  ["discord", () => t("Link Discord")],
-  ["commands", () => t("Send a command")],
-  ["talk", () => t("Ask the model about an item")],
-  ["follow", () => t("Follow the work")],
-  ["agent", () => t("Use AutoCraft from your own agent")],
-] as const;
+const SECTIONS: { id: string; title: () => string; steps: [string, () => string][] }[] = [
+  { id: "setup", title: () => t("Set up"), steps: [["runner", () => t("Connect a Task Runner")], ["discord", () => t("Link Discord")]] },
+  {
+    id: "work", title: () => t("Work with issues and pull requests"),
+    steps: [["how", () => t("How AutoCraft works")], ["commands", () => t("Commands")], ["answer", () => t("Answering AutoCraft")], ["where", () => t("Where to send them")], ["talk", () => t("Ask the model about an item")], ["follow", () => t("Follow the work")]],
+  },
+  { id: "agent-section", title: () => t("Your own agent"), steps: [["agent", () => t("Connect your own agent")]] },
+];
+
+function Section({ id, children }: { id: string; children: ReactNode }) {
+  const s = SECTIONS.find((x) => x.id === id)!;
+  return (
+    <section id={id} aria-labelledby={`${id}-title`} className="flex scroll-mt-4 flex-col gap-4 pt-4">
+      <h2 id={`${id}-title`} className="text-lg font-semibold">{s.title()}</h2>
+      {children}
+    </section>
+  );
+}
 
 export function TutorialView({ user }: ViewProps) {
   const { data } = useQuery("mention", (api) => api.mention());
@@ -320,30 +418,38 @@ export function TutorialView({ user }: ViewProps) {
           <ArrowLeftIcon aria-hidden /> {t("Help")}
         </Link>
         <h1 className="text-xl font-semibold">{t("Get started")}</h1>
-        <p>{t("Set up once, then send your first command. Each step links to its full reference in Help.")}</p>
         {setup.checks && <p className="text-sm text-ink/70">{t("Setup: {done} of {all} done", { done: setup.done, all: setup.checks.length })}</p>}
-        <nav aria-label={t("Steps")}>
-          <ol className="flex list-decimal flex-col gap-0.5 pl-6 text-sm">
-            {STEPS.map(([id, title]) => (
-              <li key={id}>
-                <a href={`#${id}`} className="inline-flex min-h-7 items-center rounded text-accent-ink hover:underline max-md:min-h-11">
-                  {title()}
-                </a>
+        <nav aria-label={t("Contents")}>
+          <ul className="flex flex-col gap-2 text-sm">
+            {SECTIONS.map((s) => (
+              <li key={s.id}>
+                <a href={`#${s.id}`} className="inline-flex min-h-7 items-center rounded font-semibold hover:underline max-md:min-h-11">{s.title()}</a>
+                <ul className="flex flex-col pl-4">
+                  {s.steps.map(([id, title]) => (
+                    <li key={id}>
+                      <a href={`#${id}`} className="inline-flex min-h-7 items-center rounded text-accent-ink hover:underline max-md:min-h-11">{title()}</a>
+                    </li>
+                  ))}
+                </ul>
               </li>
             ))}
-          </ol>
+          </ul>
         </nav>
-        <TutorialStep id="intro" n={1} title={t("What AutoCraft does for you")} refs={[{ to: "/help/workflows", label: t("Workflows") }, { to: "/help/after", label: t("After a command") }]}>
-          <p>{t("Start an issue or pull request with a command, such as review, fix-up or implement. AutoCraft does the work and posts what it found.")}</p>
-          <p>{t("Add merge to approve the merge. It works like pressing the merge button yourself: AutoCraft reviews, fixes what the review finds and merges in your name when CI is green. It comes back to you only when it cannot get there on its own.")}</p>
-          <p>{t("Without merge, it comes back with one recommendation when the steps are done.")}</p>
-        </TutorialStep>
-        <RunnerStep done={check("runner")?.done} />
-        <DiscordStep check={check("discord")} />
-        <Commands mention={mention} />
-        <TalkStep />
-        <FollowStep />
-        <AgentStep />
+        <Section id="setup">
+          <RunnerStep done={check("runner")?.done} />
+          <DiscordStep check={check("discord")} />
+        </Section>
+        <Section id="work">
+          <HowStep />
+          <CommandsStep />
+          <AnswerStep />
+          <WhereStep mention={mention} />
+          <TalkStep />
+          <FollowStep />
+        </Section>
+        <Section id="agent-section">
+          <AgentStep />
+        </Section>
         <Link to="/help/start" className="mt-2 flex min-h-12 items-center justify-between rounded-lg border border-line px-3 text-md hover:bg-ink/[0.04]">
           <span>
             <span className="text-sm text-ink/70">{t("Next:")} </span>
@@ -355,4 +461,3 @@ export function TutorialView({ user }: ViewProps) {
     </div>
   );
 }
-

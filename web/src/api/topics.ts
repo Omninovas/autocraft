@@ -95,6 +95,8 @@ const RULES: [prefix: string, topics: Topic[]][] = [
   ["workspace:", ["workspaces"]],
   ["workspace-output:", []],
   // The caches report: the runner's node reads (envs), warm tasks, default-branch heads and the warm producer's settings.
+  // The person's own settings: their own changes come back with the write; the repo choices follow tracked repos and access.
+  ["my-settings", ["repos", "access"]],
   ["envs-caches", ["envs", "tasks", "mainci", "settings"]],
   ["envs", ["envs", "tasks"]],
   ["tasks:", ["tasks", "envs"]],

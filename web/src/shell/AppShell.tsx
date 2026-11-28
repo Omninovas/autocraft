@@ -15,6 +15,7 @@ import { redirectRoutes } from "./redirects";
 import { ScopePicker, useStalePickCleared } from "./ScopePicker";
 import { SearchBox } from "./SearchBox";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
+import { SetupBanner } from "./SetupBanner";
 import { useUser } from "./UserContext";
 import { useIsPhone } from "./useMedia";
 import { useTheme } from "./theme";
@@ -298,7 +299,8 @@ export function AppShell() {
           </button>
           <UserMenu theme={theme} setTheme={setTheme} onHelp={() => setHelp(true)} />
         </header>
-        <main className="min-h-0 flex-1">{content}</main>
+        <SetupBanner user={user} />
+        <main tabIndex={-1} className="min-h-0 flex-1 outline-none">{content}</main>
         <PhoneTabs rail={rail} />
         <NavDrawer open={navOpen} onOpenChange={setNavOpen} rail={rail} />
         <Dialog.Root open={searchOpen} onOpenChange={setSearchOpen}>
@@ -363,7 +365,8 @@ export function AppShell() {
           <HealthMenu />
           <UserMenu theme={theme} setTheme={setTheme} onHelp={() => setHelp(true)} />
         </header>
-        <main className="min-h-0 flex-1 bg-panel">{content}</main>
+        <SetupBanner user={user} />
+        <main tabIndex={-1} className="min-h-0 flex-1 bg-panel outline-none">{content}</main>
       </div>
       <ShortcutSheet open={help} onOpenChange={setHelp} />
     </div>

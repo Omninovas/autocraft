@@ -40,7 +40,8 @@ const NOT_RUN: [string, () => string][] = [
 ];
 
 const PAGES = [
-  { id: "start", title: () => t("Getting started") },
+  { id: "tutorial", title: () => t("Get started") },
+  { id: "start", title: () => t("Overview") },
   { id: "commands", title: () => t("Commands") },
   { id: "after", title: () => t("After a command") },
   { id: "workflows", title: () => t("Workflows") },

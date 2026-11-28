@@ -1,6 +1,7 @@
 // The signed-in user's own settings (GET and PUT /api/me/settings); their Task Runners are listed by GET /api/runners (runners.ts).
 // Maintainers and operators set their own settings; a viewer has none.
 import { loadTrackedRepos } from "../../data/control/index.ts";
+import { loadSetupDismissed, saveSetupDismissed } from "../../data/runners/index.ts";
 import { manualOnly, parseManualOnly, setManualOnly } from "../../remote/manual-only.ts";
 import { parseInteractiveSlots, setUserInteractiveSlots, userInteractiveSlots } from "../../remote/interactive-slots.ts";
 import { parseMaxCalls, setUserMaxCalls, userMaxCalls } from "../../remote/max-calls.ts";
@@ -23,20 +24,20 @@ async function repoChoices(db: Db, req: Req): Promise<string[]> {
 
 /**
  * The reply: the protocol's settings, `manualOnly` (manual-only.ts), the ticked `tasks` of `taskChoices` (my-tasks.ts), `taskItems`
- * (task-items.ts) and `runnerPrivate` (runner-private.ts).
+ * (task-items.ts), `runnerPrivate` (runner-private.ts) and `setupDismissed`: the person dismissed the dashboard's setup banner.
  */
-type SettingsReply = UserSettingsReply & { interactiveSlots: number; manualOnly: boolean; tasks: string[]; taskChoices: readonly TaskChoice[]; taskItems: TaskItems; runnerPrivate: boolean };
+type SettingsReply = UserSettingsReply & { interactiveSlots: number; manualOnly: boolean; tasks: string[]; taskChoices: readonly TaskChoice[]; taskItems: TaskItems; runnerPrivate: boolean; setupDismissed: boolean };
 
 export const settings = async (db: Db, req: Req): Promise<SettingsReply> =>
-  ({ reserve: await userReserve(db, req.user.login), repos: await userRepos(db, req.user.login), maxCalls: await userMaxCalls(db, req.user.login), interactiveSlots: await userInteractiveSlots(db, req.user.login, req.user.role), manualOnly: await manualOnly(db, req.user.login), tasks: await userTasks(db, req.user.login), taskChoices: TASK_CHOICES, taskItems: await userTaskItems(db, req.user.login), runnerPrivate: await runnerPrivate(db, req.user.login), repoChoices: await repoChoices(db, req) });
+  ({ reserve: await userReserve(db, req.user.login), repos: await userRepos(db, req.user.login), maxCalls: await userMaxCalls(db, req.user.login), interactiveSlots: await userInteractiveSlots(db, req.user.login, req.user.role), manualOnly: await manualOnly(db, req.user.login), tasks: await userTasks(db, req.user.login), taskChoices: TASK_CHOICES, taskItems: await userTaskItems(db, req.user.login), runnerPrivate: await runnerPrivate(db, req.user.login), setupDismissed: await loadSetupDismissed(db, req.user.login), repoChoices: await repoChoices(db, req) });
 
 export async function setSettings(db: Db, req: Req): Promise<SettingsReply> {
   const b = req.json;
   if (!b || typeof b !== "object" || Array.isArray(b)) throw new HttpError(400, "the body must be a UserSettings object");
   const body = b as Record<string, unknown>;
-  const known = ["reserve", "repos", "maxCalls", "interactiveSlots", "manualOnly", "tasks", "taskItems", "runnerPrivate"];
+  const known = ["reserve", "repos", "maxCalls", "interactiveSlots", "manualOnly", "tasks", "taskItems", "runnerPrivate", "setupDismissed"];
   for (const k of Object.keys(body)) if (!known.includes(k)) throw new HttpError(400, `unknown setting ${k}`);
-  if (known.every((k) => body[k] === undefined)) throw new HttpError(400, "send reserve, repos, maxCalls, interactiveSlots, manualOnly, tasks, taskItems, runnerPrivate or several of them");
+  if (known.every((k) => body[k] === undefined)) throw new HttpError(400, "send reserve, repos, maxCalls, interactiveSlots, manualOnly, tasks, taskItems, runnerPrivate, setupDismissed or several of them");
   if (req.user.role === "viewer") throw new HttpError(403, "viewers have no settings to change");
   let reserve, repos, tasks, maxCalls: number | null | undefined, slots: number | undefined, manual: boolean | undefined, priv: boolean | undefined, items: TaskItems | undefined;
   try {
@@ -48,6 +49,7 @@ export async function setSettings(db: Db, req: Req): Promise<SettingsReply> {
     if (body.tasks !== undefined) tasks = parseTasks(body.tasks);
     if (body.taskItems !== undefined) items = parseTaskItems(body.taskItems);
     if (body.runnerPrivate !== undefined) priv = parseRunnerPrivate(body.runnerPrivate);
+    if (body.setupDismissed !== undefined && typeof body.setupDismissed !== "boolean") throw new Error("setupDismissed must be true or false");
   } catch (e) { throw new HttpError(400, (e as Error).message); }
   if (reserve) await setUserReserve(db, req.user.login, reserve);
   if (repos) await setUserRepos(db, req.user.login, repos);
@@ -57,5 +59,6 @@ export async function setSettings(db: Db, req: Req): Promise<SettingsReply> {
   if (tasks) await setUserTasks(db, req.user.login, tasks);
   if (items) await setUserTaskItems(db, req.user.login, items);
   if (priv !== undefined) await setRunnerPrivate(db, req.user.login, priv);
+  if (typeof body.setupDismissed === "boolean") await saveSetupDismissed(db, req.user.login, body.setupDismissed);
   return settings(db, req);
 }

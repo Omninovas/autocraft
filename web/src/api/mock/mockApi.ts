@@ -66,7 +66,8 @@ export function createMockApi(): Api {
   const me: User = MOCK_USERS[mockRole()];
   const listeners = new Set<() => void>();
   const changed = () => listeners.forEach((fn) => fn());
-  let discordLinked = true;
+  // `?discord=unlinked` starts without a linked account, for screenshots of the setup steps.
+  let discordLinked = new URLSearchParams(location.search).get("discord") !== "unlinked";
   const discord: DiscordSetup = {
     state: "connected", detail: null, at: nowIso(), repos: ["photocraft", "pdfcraft", "wordcraft"],
     offer: {
@@ -259,7 +260,7 @@ export function createMockApi(): Api {
     ...createChatMock(me, changed),
     prompts: () => wait(promptsReport(null), 60),
     next: () => wait(nextPageFixture(), 60),
-    mention: () => wait({ mention: "autocraft" }, 20),
+    mention: () => wait({ mention: "autocraftbot" }, 20),
     batch: (id) => wait(batchDetailMock(id), 60),
     signOut: () => wait(undefined),
     subscribe(fn) {

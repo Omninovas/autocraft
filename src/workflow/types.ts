@@ -19,8 +19,8 @@ export const shownWorkflow = (history: readonly ItemWorkflow[]): ItemWorkflow | 
   return w?.state === "superseded" ? null : w;
 };
 
-/** The six blockers that bring an approved item back to a person, and `other` for a stop outside them (its reason shown as given). */
-export type Blocker = "major-finding" | "author-commits" | "failed-twice" | "beyond-agreed" | "other";
+/** The blockers that bring an approved item back to a person, and `other` for a stop only a person can settle (its reason shown as given). */
+export type Blocker = "author-commits" | "failed-twice" | "other";
 
 export const WEIGHT_MIN = 1;
 export const WEIGHT_MAX = 10;
@@ -41,6 +41,8 @@ export type PlanPart = {
   /** The question whose option the part is. */
   question?: QuestionRef;
   major?: boolean;
+  /** A review fix whose blocking class says it does not block (src/core/review-blocking.ts): on a PR approved for merge it is filed as a follow-up, not made. */
+  minor?: true;
   /** A finding of the pre-merge review: a person who drops it overrules it, and it stays dropped in the plan while it is the workflow's. */
   premerge?: true;
   /** Who dropped it from the plan. */

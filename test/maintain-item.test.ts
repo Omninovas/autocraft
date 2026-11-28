@@ -40,7 +40,7 @@ test("the item page read gives a viewer no security findings, and a maintainer g
   // A blocker's recommendation shows like any other, and a viewer reads none of the landing fix.
   const id = (await listWorkflows(db, { refs: [{ repo: "open-app", number: 2 }] }))[0]!.id;
   await updateWorkflow(db, id, { state: "blocked", blocker: "failed-twice", rec: { text: "Try the fix-up again, then merge.", parts: { fix: [], drop: [] }, merges: true, again: "fixup" } });
-  assert.match((await item(db, as("maintainer"))).status!.rec ?? "", /^Try the fix-up again, then merge\. Reply yes/);
+  assert.match((await item(db, as("maintainer"))).status!.rec ?? "", /^Try the fix-up again, then merge\. Reply to go ahead/);
   assert.equal((await item(db, as("viewer"))).status!.rec, null);
 });
 

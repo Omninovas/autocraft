@@ -29,7 +29,7 @@ import { workScore } from "./work-score.ts";
 import { tripsOfRepo } from "./push-outcome.ts";
 import { pushAllowed } from "./gates.ts";
 import { landedOpen } from "./decide.ts";
-import { ciAt, diffPushesSince, landedWhy, neededReview, type CiState } from "./evidence.ts";
+import { ciAt, landedWhy, neededReview, type CiState } from "./evidence.ts";
 import { standingFor } from "./standing.ts";
 import { mergeWaits, workflowGate } from "./may.ts";
 import type { WorkflowFact } from "../data/workflow/types.ts";
@@ -327,7 +327,6 @@ async function buildPr(db: Db, d: PrPassData, ref: string, m: Mirrored, c: Ctx):
   base.workflow = wfFact && overruled.length ? { ...wfFact, overruled } : wfFact;
   // The merge approval's own count of our pushes and tries starts when its person approved it or last went on with it.
   const owned = wfFact && (wfFact.approved || wfFact.entry === "merge") ? (wfRow?.approvedAt && wfRow.approvedAt > wfFact.since ? wfRow.approvedAt : wfFact.since) : null;
-  if (owned !== null && head) base.ownPushes = diffPushesSince(ours, head, owned);
   base.standing = standingIn(wfFact, d.workflow.actors, repo, acts);
   base.endedWorkflow = d.workflow.ended.get(ref) ?? null;
   if (integration) {
@@ -379,12 +378,12 @@ async function buildPr(db: Db, d: PrPassData, ref: string, m: Mirrored, c: Ctx):
     // A request counts only while GitHub confirmed its maker's write permission within HOLD_MAX, which ends with the clock alone.
     for (const r of operator.requests) if (r.maker_checked_at) refresh.soon(ref, Date.parse(r.maker_checked_at) + HOLD_MAX);
     base.operator = {
-      fix: !!head && operator.requests.some((r) => r.from_head === head) ? { attempts: operatorTriesIn(patch.fixups) } : null,
+      fix: !!head && operator.requests.some((r) => r.from_head === head) ? { attempts: operatorTriesIn(patch.fixups, wfFact?.since) } : null,
       hold: legs.some((l) => l.state !== "queued"), premerge: !!head && legs.some((l) => l.state === "ci" && l.head === head),
     };
   }
   // A fix-up request holds the PR's merge only while the planner can work it: same head, pushable, approved, not conflicting, not a draft, tries left.
-  if (base.operator?.fix && !base.heldBacklog && !base.draft && base.mergeable !== "CONFLICTING" && base.pushable && pushAllowed(base, "fixup", true) && operatorTriesIn(patch.fixups) < FIXUP_MAX_ATTEMPTS) base.operator.hold = true;
+  if (base.operator?.fix && !base.heldBacklog && !base.draft && base.mergeable !== "CONFLICTING" && base.pushable && pushAllowed(base, "fixup", true) && operatorTriesIn(patch.fixups, wfFact?.since) < FIXUP_MAX_ATTEMPTS) base.operator.hold = true;
   const lintAt = (qh: string, cifixHead: string) => lintOf(patch, qh, { cifixHead, operatorHead: head ?? qh, tasks: d.tasks });
   if (operator && state === "OPEN" && head) {
     for (const l of lintAt(head, head)) if (l.source === "operator") base.lint.push({ step: "fixup", source: "operator", ended: l.ended });

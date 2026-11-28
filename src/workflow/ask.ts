@@ -81,9 +81,12 @@ const regression = (f: PrFacts, rest: string): string =>
 /** The sentence of a wait that has none of its own. */
 const waitText = (wait: string): string => t("It waits for {what}.", { what: wait.replace(/\.$/, "") });
 
-/** A PR whose review asks for fixes nobody makes comes back to go on without them; null for any other. */
+/**
+ * A PR whose review asks for fixes nobody makes comes back to go on without them; null for any other. On a PR approved for merge only the
+ * fixes that block it count: the others are filed as follow-ups and stop nothing.
+ */
 export function withoutFixes(f: PrFacts, o: Asked): Recommendation | null {
-  const parts = planned(o.parts);
+  const parts = planned(o.parts).filter((n) => !(o.approved && o.parts.find((p) => p.n === n)?.minor));
   return o.review?.verdict === "take-fix" && parts.length && (o.approved ? nobodyFixes(f) : nobodyFixesFor(f)) ? without(parts, f.fixup!.fixes === 0) : null;
 }
 
@@ -125,7 +128,7 @@ function reviewFailed(o: Pick<Asked, "approved" | "parts" | "review">): Recommen
 
 /** A conflict with the base branch that AutoCraft's merge of it could not resolve, on a PR approved for merge: someone resolves it on its branch, and a yes looks again. */
 const conflictByHand = (parts: Recommendation["parts"], merges: boolean): Recommendation => ({
-  text: t("It conflicts with its base branch, and AutoCraft could not resolve the conflict. Resolve it on the pull request's branch, or ask the contributor to; the merge stays approved, and AutoCraft reviews the new commits before it merges. Say yes once it is resolved."),
+  text: t("It conflicts with its base branch, and AutoCraft could not resolve the conflict. Resolve it on the pull request's branch, or ask the contributor to; the merge stays approved, and AutoCraft reviews the new commits before it merges. Reply once it is resolved."),
   parts, merges, goes: "look",
 });
 
@@ -137,7 +140,7 @@ function premergeFailed(f: PrFacts, o: Pick<Asked, "approved" | "parts">): Recom
   const tries = f.premerge?.tries ?? 0;
   const failed = tries > 1 ? t("The pre-merge review of this commit failed {n} times.", { n: tries }) : t("The pre-merge review of this commit failed.");
   return {
-    text: `${failed} ${t("Yes gives it one more try, and the merge goes on once it is clean and CI is green. Write merge to merge it without that review once CI is green.")}`,
+    text: `${failed} ${t("Going ahead gives it one more try, and the merge goes on once it is clean and CI is green. Write merge to merge it without that review once CI is green.")}`,
     parts: { fix: [], drop: droppedOf(o.parts) }, merges: o.approved, retriesPremerge: true,
   };
 }
@@ -177,9 +180,11 @@ export function questionFor(f: PrFacts, p: Plan, o: Asked): Question | null {
   // The implementation's own question, and a review that says hold or close: what the person has not answered comes back by itself (question.ts, blockers.ts).
   if (code === "implement-question" || code === "implement-stuck" || p.state === "opus-hold" && code === "answer") return null;
   const rec = recFor(code, f, p.wait, o);
+  // Blocking fixes of an approved PR that nobody can make: a fix that could not be made.
+  const unmade = o.approved && (code === "answer" || code === "ask-failed");
   return {
-    blocker: code === "verification-failed" ? "major-finding" : "other",
-    params: { code, reason: (p.wait ?? code).replace(/^a person: /, "") }, rec: rec.goes ? rec : onConflict(rec, o.conflict),
+    blocker: unmade ? "failed-twice" : "other",
+    params: { code, reason: (p.wait ?? code).replace(/^a person: /, ""), ...(unmade ? { step: "fix-up" } : {}) }, rec: rec.goes ? rec : onConflict(rec, o.conflict),
   };
 }
 

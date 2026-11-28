@@ -15,30 +15,26 @@ import { loadItems, loadRepos } from "../data/mirror/index.ts";
 import { retryPremergeAt } from "../data/review/index.ts";
 import { dropSnapshotCache, setCallLevels } from "../data/runners/index.ts";
 import { addAudit } from "../data/control/index.ts";
-import { countEventsSince, dropWorkflows, loadItemRunners, releaseItemRunner, takeItemRunner, endFixupRequests, loadFixupRequests, listWorkflows, loadActions, loadLinks, loadPrWorkflows, loadWorkflowHistory, moveWorkflows, recordEvents, retryActions, sameWorkflow, saveWorkflows, startWorkflows, type CloseAs, type WorkflowAction, type WorkflowEvent, type WorkflowPatch } from "../data/workflow/index.ts";
+import { countEventsSince, dropWorkflows, loadItemRunners, releaseItemRunner, takeItemRunner, endFixupRequests, loadFixupRequests, listWorkflows, loadActions, loadLinks, loadPrWorkflows, loadWorkflowHistory, recordEvents, retryActions, sameWorkflow, saveWorkflows, startWorkflows, type CloseAs, type WorkflowAction, type WorkflowEvent, type WorkflowPatch } from "../data/workflow/index.ts";
 import { t } from "../i18n/index.ts";
 import { chainsOwn } from "../core/evidence.ts";
 import { ACTION_WAITS } from "../core/may.ts";
 import { takeRefusal, type TakeRefusal } from "../core/item-runner.ts";
 import { parseTripKey } from "../core/push-outcome.ts";
 import { loadOwnPushes } from "../data/views/own-pushes.ts";
-import { redAtHead } from "../core/decide.ts";
 import { connectUrl, loadRunnerRoom } from "../core/runner-room.ts";
 import type { Tier } from "../remote/protocol.ts";
-import { loadPrFact } from "../core/facts.ts";
 import type { Db } from "../db/index.ts";
 import type { Exec } from "../fixup/git.ts";
 import { ownerOf, slugOf } from "../owners.ts";
 import { claimLevels } from "../remote/level.ts";
 import { actRefusal } from "../github/identity.ts";
-import { mirrorBehind } from "../preapproval/index.ts";
+import { dropFixParts, mirrorBehind } from "../preapproval/index.ts";
 import { settlesNow } from "../preapproval/permissions.ts";
 import * as fx from "./effects.ts";
 import { isOpenQuestion } from "./question.ts";
-import { premergeParts } from "./premerge.ts";
-import { atBlocker } from "./recommend.ts";
-import { isLive, premergeStopped, resolve, type Refusal, type Run } from "./resolve.ts";
-import { approvedNowLine, attributionLines, confirmLine, currentStep, listText, recommendationLine, recommendationText, replyLine, runnerLine, stateLine, stepsFor, utcClock, workflowSteps, type Clock } from "./status.ts";
+import { isLive, resolve, type Refusal, type Run } from "./resolve.ts";
+import { approvedNowLine, attributionLines, confirmLine, currentStep, listText, recommendationLine, replyLine, runnerLine, stateLine, stepsFor, utcClock, workflowSteps, type Clock } from "./status.ts";
 import { asksForApprover, heldWork, openRecommendation, RULE_STARTER, WEIGHT_NORMAL, type CloseReason, type HeldWork, type ItemKind, type ItemRef, type ItemWorkflow, type Parsed, type QuestionRef, sameQuestion, type Surface, type WorkflowEventKind } from "./types.ts";
 import { takenOver } from "./work.ts";
 
@@ -319,15 +315,6 @@ async function tryOne(db: Db, actor: Actor, via: Surface, input: CommandInput, t
       : t("{login} held it after you wrote. Send it again, or reply resume to go on.", { login: held!.stoppedBy ?? "" });
     return out("refused", reply(t("Nothing ran on {ref}: {why}", { ref: refText(on.repo, on.number), why })), held!.id);
   }
-  if (r.kind === "refused" && r.refusal.why === "premerge-defects") {
-    const now = await askToFix(db, wf!, on);
-    const line = t("Nothing ran on {ref}: {why}", { ref: refText(on.repo, on.number), why: [replyLine(r, input.clock, input.mention), premergeStopped(now)?.length ? t("Fix them first?") : null, recommendationLine(now.rec)].filter((x) => x !== null).join(" ") });
-    return { ...out("refused", reply(line), now.id), ...(now.recAt ? { question: { workflowId: now.id, recAt: now.recAt } } : {}) };
-  }
-  if (r.kind === "refused" && r.refusal.why === "red-ci") {
-    const line = t("Nothing ran on {ref}: {why}", { ref: refText(on.repo, on.number), why: `${replyLine(r, input.clock, input.mention)} ${t("Already asked: {question}", { question: recommendationText(wf!.rec!) })}` });
-    return { ...out("refused", reply(line), wf!.id), ...(wf!.recAt ? { question: { workflowId: wf!.id, recAt: wf!.recAt } } : {}) };
-  }
   if (r.kind === "refused") {
     const now = r.refusal.why === "already-approved" && wf ? approvedNowLine(wf, input.clock) : null;
     return { ...out("refused", reply([replyLine(r, input.clock, input.mention), now].filter((x) => x !== null).join(" ")), wf?.id ?? null), refusal: r.refusal.why };
@@ -606,6 +593,8 @@ async function carryOut(c: fx.Ctx, r: Run, wf: ItemWorkflow | null, actor: Actor
   // A new weight also orders the queued calls of the item and of the PR that implements it.
   const weighed = patch.weight === undefined ? [] : [item, ...(live.kind === "issue" ? [await issuePr(live)] : [])].filter((x) => x !== null);
   const work = runs ? await fx.again(on, { again: r.again, plan: live.plan, fix: r.fix, merges: r.merges, says: o.says && r.approve, instruction: r.instruction }) : null;
+  // The PR whose fix-ups the dropped parts come out of (src/preapproval dropFixParts).
+  const dropOn = r.drop.length ? (on.item.kind === "pr" ? on.item : live.kind === "issue" ? await issuePr(live) : null) : null;
   if (r.drop.length) {
     // The head the parts are dropped at: a dropped pre-merge finding overrules the review only there and at the heads our own pushes make from it.
     const at = live.kind === "issue" ? (await issuePr(live))?.head ?? null : item.head;
@@ -655,6 +644,7 @@ async function carryOut(c: fx.Ctx, r: Run, wf: ItemWorkflow | null, actor: Actor
       if (r.retryPremerge && live.recHead !== null) await retryPremergeAt(db, [{ repo: on.item.repo, number: on.item.number, head: live.recHead }]);
       if (weighed.length) await setCallLevels(db, [...await claimLevels(db, weighed)].map(([ref, level]) => ({ ref, level })));
       await work?.write(live.id);
+      if (dropOn) await dropFixParts(db, { repo: dropOn.repo, number: dropOn.number, titles: live.plan.filter((p) => r.drop.includes(p.n)).map((p) => p.title), by });
       return live.id;
     },
   };
@@ -734,33 +724,14 @@ async function answerQuestion(c: fx.Ctx, q: QuestionRef, option: string): Promis
 }
 
 /**
- * The question of an item stopped at the pre-merge review's defects: whether to fix them first. One whose plan has no part for them gets
- * those parts, and the recommendation to fix them, then merge, takes the place of the open one.
+ * What the word merge depends on. `reviewFailed`: the item's question is about a review that failed for good, and no commit of ours that owes
+ * a review of its own followed (the author's are refused as for any answer).
  */
-async function askToFix(db: Db, wf: ItemWorkflow, on: fx.Target): Promise<ItemWorkflow> {
-  const pr = on.kind === "pr" ? on.number : (await implementationPr(db, wf))?.number;
-  if (!wf.rec || premergeStopped(wf)?.length || pr === undefined || wf.recHead === null) return wf;
-  const parts = await premergeParts(db, { repo: wf.repo, number: pr, head: wf.recHead }, wf.plan, wf.approvedBy !== null);
-  if (!parts.length) return wf;
-  const plan = [...wf.plan, ...parts], blockerParams = { ...wf.blockerParams, premerge: parts.map((p) => p.n) }, recAt = new Date().toISOString();
-  const patch = { plan, blockerParams, recAt, rec: atBlocker({ blocker: wf.blocker!, params: blockerParams }, null, plan) };
-  if (!(await moveWorkflows(db, [{ id: wf.id, patch, at: recAt, was: wf }])).size) throw new Moved();
-  return { ...wf, ...patch };
-}
-
-/**
- * What the word merge depends on. `redCi`: the item's question is about red CI, and CI still fails on the PR's head. `reviewFailed`: it is about a
- * review that failed for good, and no commit of ours that owes a review of its own followed (the author's are refused as for any answer).
- */
-async function mergeFacts(db: Db, wf: ItemWorkflow, on: fx.Target): Promise<{ redCi?: boolean; reviewFailed?: boolean }> {
-  const rec = openRecommendation(wf), red = rec?.cause?.code === "red-ci";
-  if (!red && !(rec?.skipsReview && wf.recHead !== null)) return {};
+async function mergeFacts(db: Db, wf: ItemWorkflow, on: fx.Target): Promise<{ reviewFailed?: boolean }> {
+  const rec = openRecommendation(wf);
+  if (!(rec?.skipsReview && wf.recHead !== null)) return {};
   const pr = on.kind === "pr" ? on : await implementationPr(db, wf);
   if (!pr?.head) return {};
-  if (red) {
-    const f = await loadPrFact(db, pr.repo, pr.number);
-    return { redCi: f !== null && (f.ci === "failure" || redAtHead(f)) };
-  }
   const ours = (await loadOwnPushes(db, [{ repo: pr.repo, number: pr.number }])).get(`${pr.repo}#${pr.number}`) ?? [];
   return { reviewFailed: !chainsOwn(ours, wf.recHead!, pr.head) || chainsOwn(ours.filter((p) => p.small), wf.recHead!, pr.head) };
 }

@@ -23,7 +23,7 @@ import type { Params, Stop, StopCode } from "../core/codes.ts";
 import { byHand, conflictPath, decidePr, fixAllowed, fixupOf, isDraft as draftPr, mergeOwned, notStarted, premergeFix } from "../core/decide.ts";
 import { pushRefusal } from "../core/gates.ts";
 import { draftOf, loadPrFact, loadPrFacts } from "../core/facts.ts";
-import { chainsOwn, ciAt, neededReview, type HeadReview, type RecordedPush } from "../core/evidence.ts";
+import { askedParts, chainsOwn, ciAt, neededReview, type HeadReview, type RecordedPush } from "../core/evidence.ts";
 import { PREMERGE_MAX_TRIES } from "../core/rules.ts";
 import { mayPush } from "../core/may.ts";
 import { standingFor } from "../core/standing.ts";
@@ -54,7 +54,7 @@ import { permKey, standings, type Standing } from "../data/access/index.ts";
 import { githubIdentity } from "../github/identity.ts";
 import { addTurns } from "../data/conversations/index.ts";
 import {
-  addFixupRequests, addLegs, adoptLegs, endFixupRequests, listWorkflows, loadFixupRequests, loadLegPass, loadLegs, loadWorkflowFacts, moveFixupRequests, moveLegs,
+  addFixupRequests, addLegs, adoptLegs, endFixupRequests, listWorkflows, loadFixupRequests, loadLegPass, loadLegs, loadWorkflowFacts, moveFixupRequests, moveLegs, relinkLegFix,
   type LegContext, type LegMove, type LegPass, type LegRow, type LegState, type WorkflowFact,
 } from "../data/workflow/index.ts";
 import type { Db } from "../db/index.ts";
@@ -161,6 +161,46 @@ export class PreapprovalRefused extends Error {
   constructor(message: string, why: "active" | "draft" | null = null) { super(message); this.active = why === "active"; this.draft = why === "draft"; }
 }
 
+/**
+ * A person dropped plan parts (`titles`): the parts-only fix-up requests of the PR (src/core/evidence.ts askedParts) lose them, as the
+ * person's word wins over the fix-up AutoCraft asked for. A request is never changed under a try that may be reading it: it is withdrawn,
+ * and one with parts left is asked again with those, at the same head and for the same merge leg. What a withdrawn try made is not pushed
+ * (src/fixup/index.ts checks the request right before the push; its lint run takes no withdrawn request). A leg whose request is withdrawn
+ * with no part left goes back to review at the head it was at, so the merge goes on there.
+ */
+export async function dropFixParts(db: Db, o: { repo: string; number: number; titles: readonly string[]; by: string }): Promise<void> {
+  const dropped = new Set(o.titles.map((x) => x.toLowerCase()));
+  if (!dropped.size) return;
+  const requests = (await loadFixupRequests(db, { refs: [{ repo: o.repo, number: o.number }], anyMaker: true })).filter((r) => r.state === "queued");
+  const changed: { id: number; by: string; head: string; instructions: string | null }[] = [];
+  for (const r of requests) {
+    const parts = askedParts(r.instructions);
+    if (!parts) continue;
+    const kept = parts.map((p, i) => ({ p, i })).filter(({ p }) => !dropped.has(p.title.toLowerCase()));
+    if (kept.length === parts.length) continue;
+    const [first, ...lines] = r.instructions.split("\n");
+    changed.push({ id: r.id, by: r.by, head: r.from_head, instructions: kept.length ? [first, ...kept.map(({ i }) => lines[i]!)].join("\n") : null });
+  }
+  if (!changed.length) return;
+  await db.write(async () => {
+    const ended = new Set(await endFixupRequests(db, changed.map((c) => ({ id: c.id, reason: `${o.by} dropped ${c.instructions === null ? "every part" : "parts"} it fixes` }))));
+    const legs = (await loadLegs(db, [{ repo: o.repo, number: o.number }], { activeOnly: true })).get(refOf(o.repo, o.number)) ?? [];
+    for (const c of changed) {
+      if (!ended.has(c.id)) continue;
+      const leg = legs.find((l) => l.state === "fixup" && l.fix_id === c.id);
+      if (c.instructions !== null) {
+        const made = (await addFixupRequests(db, [{ repo: o.repo, number: o.number, fromHead: c.head, instructions: c.instructions, by: c.by, merge: false }])).get(refOf(o.repo, o.number));
+        if (leg && made) await relinkLegFix(db, leg.id, made.requestId);
+      } else if (leg) {
+        await move(db, leg, "review", { head: leg.from_head, line: `${o.by} dropped every part the fix-up of ${short(leg.from_head)} was to fix: it is withdrawn, and the merge goes on at ${short(leg.from_head)}.` });
+      }
+    }
+  });
+}
+
+/** A refusal that a moment may lift: GitHub has not answered yet on what the step needs. */
+export class NotYet extends Error {}
+
 /** Why a leg pinned to a head (a command's) was refused: the PR has another head now. */
 export const HEAD_CHANGED = "the PR changed after your comment; comment again";
 
@@ -204,9 +244,9 @@ export async function checkFixup(db: Db, o: { repo: string; number: number; by: 
   const may = mayPush({ kind: "fixup", repoApproval: null, workflow: null, operatorFix: true, by });
   if (!may.ok) throw new Error(may.why);
   const writes = await ensureAuthorWrites(db, repo, number, it.head_repo);
-  if (writes === "unknown") throw new Error("the author's permission on the repository could not be read yet; try again");
+  if (writes === "unknown") throw new NotYet("the author's permission on the repository could not be read yet; try again");
   if (!pushable(it.head_repo, repo, checks?.head_oid === head ? checks.maintainer_can_modify : null, it.head_ref, await longLivedOf(db, repo), false, writes === "yes")) throw new Error("can't push to the contributor's branch");
-  if (!await operatorTriesLeft(db, repo, number)) throw new Error("the fix-up tries for this PR are used up");
+  if (!await operatorTriesLeft(db, repo, number, fact.workflow?.since)) throw new Error("the fix-up tries for this PR are used up");
   if (await queuedOperatorFix(db, repo, number, head)) throw new Error(`a fix-up of ${ref} is already queued`);
   if (merge && await hasLeg(db, repo, number)) throw busy(ref);
   return {
@@ -224,8 +264,9 @@ export async function checkFixup(db: Db, o: { repo: string; number: number; by: 
 /**
  * Checks a merge leg with no fix-up: it starts in `review` at the current head, so the PR merges only after a take review, a clean
  * pre-merge review and green CI there. The approval says the change is wanted, so an unsure review does not stop it, and a take-fix
- * review's fixes are made by the pipeline's fix-up, whose push is reviewed again; a pre-merge defect, a red head the CI fix cannot
- * repair or a fix-up that cannot run stops the leg and the workflow asks.
+ * review's fixes are made by the pipeline's fix-up, whose push is reviewed again; a review that says hold or close, a pre-merge defect past its
+ * fix-up rounds or a failed verification stops the leg and the workflow has it fixed (src/workflow/advance.ts fixFirst); a red head the CI fix
+ * cannot repair or a fix-up that cannot run stops the leg and the workflow asks.
  *
  * The workflow the leg belongs to puts the PR in the pipeline's scope and is its merge approval, so neither is checked. `head`, when
  * given, is the only head it may start at: the one the person saw (a command's comment-time head). `fromHead`: the head the person
@@ -455,7 +496,7 @@ async function whyNotPlanned(db: Db, f: PrFacts): Promise<string | null> {
   if (notStarted(f)) return "nobody started the PR";
   const refused = pushRefusal(f, "fixup", true);
   if (refused) return `the push is not approved: ${refused.replace(/\.$/, "")}`;
-  if (!await operatorTriesLeft(db, f.repo, f.number)) return "the fix-up tries are used up";
+  if (!await operatorTriesLeft(db, f.repo, f.number, f.workflow?.since)) return "the fix-up tries are used up";
   return "the pipeline does not plan the fix-up";
 }
 
@@ -656,10 +697,13 @@ async function advance(db: Db, p: Row, ctx: LegContext | "ended" | "unlinked", p
     return;
   }
   // queued: the merge queue owns it. A new review that asks for fixes, sure or not, of a PR approved for merge: the pipeline's fix-up runs under
-  // that approval, and its push is the leg's own again. A batch that holds the PR, or a merge of the repo under way, goes first.
-  if (!reviewed || keptVerdict(p, head, pf) !== "take-fix" || (await reviewAt(p, leg, head, pf, wake)).kind !== "takefix") return;
+  // that approval, and its push is the leg's own again. A new review that says hold or close takes it back to review, which stops for its fix
+  // (src/workflow/advance.ts fixFirst). A batch that holds the PR, or a merge of the repo under way, goes first.
+  if (!reviewed) return;
+  const r = keptVerdict(p, head, pf) === "take" ? null : accepted(await reviewAt(p, leg, head, pf, wake));
+  if (r?.kind !== "takefix" && r?.kind !== "bad") return;
   const left = await db.write(async () => !await inActiveBatch(db, p.repo, p.number) && !await mergeRunning(db, p.repo) && await moveRaw(db, p, "review", {}));
-  if (left) await say(db, p.repo, p.number, `The review of ${headName(p)} now asks for fixes; the pipeline's fix-up comes first.`);
+  if (left) await say(db, p.repo, p.number, r.kind === "takefix" ? `The review of ${headName(p)} now asks for fixes; the pipeline's fix-up comes first.` : `The review of ${headName(p)} now asks for changes before the merge; they are fixed first.`);
 }
 
 /** Ends fix-up requests the planner can no longer work (someone else's push moved the PR's head, it closed, the push is not possible), with the reason in the thread. Requests of a pre-approved merge end with it. */

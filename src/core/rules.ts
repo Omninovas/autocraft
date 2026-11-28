@@ -87,11 +87,6 @@ export function conflictNote(bucket: string, base: string): string | null {
 
 /** Fix-up tries (pushed, failed, refused or rejected) before the step leaves the PR to a person: since a person last went on with a PR approved for merge, else over the PR's life. */
 export const FIXUP_MAX_ATTEMPTS = 2;
-/**
- * Pushes of ours that change a PR's own diff (fix-ups, CI fixes, conflict resolutions; not a base merge that leaves it the same) since a person
- * approved its merge or last went on with it: the next one waits for their answer. A runaway backstop that normal work never reaches.
- */
-export const PUSHES_PER_APPROVAL = 10;
 /** Review rounds of the author's new commits on a PR approved for merge per UTC day (since a person last went on with it): the next one waits for their answer. A runaway backstop that normal work never reaches. */
 export const AUTHOR_ROUNDS_PER_DAY = 10;
 /** Lint rounds (a lint task on a stored model patch) per head before the patch is abandoned. */

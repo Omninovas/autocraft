@@ -39,13 +39,27 @@ export type WorkflowRow = {
   updated_at: string; step: string | null; pr_number: number | string | null; version: number; accepted_head: string | null; review_asked_at: string | null; taken_by: string | null;
 };
 
-/** Blockers earlier releases wrote that no longer exist; a row stopped at one reads as `other` until src/workflow/outside-resume.ts resumes it. */
-const RETIRED_BLOCKERS: readonly string[] = ["large-fix", "outside-purpose"];
+/** Blockers earlier releases wrote that no longer exist; a row stopped at one reads as `other` until src/workflow/retired-stops.ts resumes it. */
+export const RETIRED_BLOCKERS: readonly string[] = ["large-fix", "outside-purpose", "major-finding", "beyond-agreed"];
 
-/** What a held row goes back to: a question at a retired blocker is no question any more, so a resume runs on. */
+/**
+ * Waits an earlier release asked the approver about as `other` that no longer ask as they did: a failed verification and screenshots that
+ * show a regression, which AutoCraft now fixes itself, and review fixes nobody makes (`answer`, `ask-failed`), whose minor fixes are filed as
+ * follow-ups; a blocking one nobody can make asks again as a fix that could not be made.
+ */
+const RETIRED_WAITS: readonly unknown[] = ["verification-failed", "screenshots", "answer", "ask-failed"];
+
+/**
+ * A stop of an approved item that no longer stops it, as an earlier release stored it (the blocker column and its params): a retired blocker,
+ * the limit of our pushes per approval, or a finding AutoCraft now fixes before the merge.
+ */
+export const retiredStop = (blocker: unknown, params: Record<string, unknown> | null | undefined): boolean =>
+  typeof blocker === "string" && (RETIRED_BLOCKERS.includes(blocker) || (blocker === "other" && (params?.limit === "pushes" || RETIRED_WAITS.includes(params?.code))));
+
+/** What a held row goes back to: a question at a retired stop is no question any more, so a resume runs on. */
 function heldParams(p: Record<string, unknown> | null): Record<string, unknown> | null {
-  const held = p?.held as { rec?: unknown; blocker?: unknown; params?: unknown } | undefined;
-  if (!held || typeof held.blocker !== "string" || !RETIRED_BLOCKERS.includes(held.blocker)) return p;
+  const held = p?.held as { rec?: unknown; blocker?: unknown; params?: Record<string, unknown> } | undefined;
+  if (!held || !retiredStop(held.blocker, held.params)) return p;
   const { rec: _rec, blocker: _blocker, params: _params, ...rest } = held;
   return { ...p, held: rest };
 }

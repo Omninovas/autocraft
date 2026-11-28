@@ -5,8 +5,9 @@
 // always agree. A blocker the review cannot speak for (author commits, a failing step, files beyond the plan, a merge
 // leg that stopped) gets a sentence built here from its facts.
 import { t } from "../i18n/index.ts";
-import { byHand, type ConflictPath, type HeldPush } from "../core/decide.ts";
-import { PREMERGE_DEFECT_REASON, PREMERGE_FAILED_REASON, PREMERGE_UNSURE_REASON, PUSHES_PER_APPROVAL, UNSURE_REASON } from "../core/rules.ts";
+import { byHand, type ConflictPath } from "../core/decide.ts";
+import { PREMERGE_DEFECT_REASON, PREMERGE_FAILED_REASON, PREMERGE_UNSURE_REASON, UNSURE_REASON } from "../core/rules.ts";
+import { notBlocking } from "../premerge/types.ts";
 import { asSentence, clipText } from "../prose.ts";
 import type { ReviewFix, ReviewRecommendation } from "../review/opus-parse.ts";
 import type { Found } from "./blockers.ts";
@@ -24,7 +25,7 @@ export function planOf(fixes: readonly ReviewFix[], before: readonly PlanPart[])
   const parts: PlanPart[] = fixes.map((f, i) => {
     const title = partTitle(f);
     const was = before.find((p) => p.state === "dropped" && p.title.toLowerCase() === title.toLowerCase());
-    return { n: i + 1, title, source: "review" as const, file: f.file, ...(f.major ? { major: true } : {}), ...(was?.droppedBy ? { droppedBy: was.droppedBy } : {}), state: dropped.has(title.toLowerCase()) ? "dropped" as const : "planned" as const };
+    return { n: i + 1, title, source: "review" as const, file: f.file, ...(f.major ? { major: true } : {}), ...(notBlocking(f) ? { minor: true as const } : {}), ...(was?.droppedBy ? { droppedBy: was.droppedBy } : {}), state: dropped.has(title.toLowerCase()) ? "dropped" as const : "planned" as const };
   });
   const titles = new Set(parts.map((p) => p.title.toLowerCase()));
   const overruled = before.filter((p) => p.premerge && p.state === "dropped" && !titles.has(p.title.toLowerCase()));
@@ -140,28 +141,15 @@ function withFinding(rec: Recommendation, finding: string | null): Recommendatio
 export const afterPush = (rec: Recommendation): Recommendation => ({ ...rec, text: t("The author pushed commits after the last question. {text}", { text: rec.text }) });
 
 /**
- * What an item stopped at a blocker comes back with. A yes resumes the plan with the merge still approved:
+ * What an item approved for merge stopped at a blocker comes back with. A yes resumes the plan with the merge still approved:
  * - a failing step runs again (the fix-up of the planned parts, a new review for a failing CI fix; a stuck implementation comes back through question.ts);
- * - findings of the pre-merge review (`params.premerge`: their plan parts) are fixed first, never merged as they are;
- * - a major finding takes the review's own recommendation when it gave one;
  * - the author's commits that the review round found beyond what was approved are kept; where the round had no review, they are reviewed;
  * - for the rest, what the blocker was about is accepted as it is.
  */
-export function atBlocker(found: Found, review: ReviewView | null, plan: readonly PlanPart[], mergeEntry = false): Recommendation {
+export function atBlocker(found: Found, _review: ReviewView | null, plan: readonly PlanPart[], mergeEntry = false): Recommendation {
   const drop = droppedOf(plan);
   const go = (text: string, extra: Partial<Recommendation> = {}): Recommendation => ({ text, parts: { fix: [], drop }, merges: true, ...extra });
   const p = found.params;
-  const premerge = (p.premerge as number[] | undefined) ?? null;
-  if (premerge) {
-    if (premerge.length) {
-      // A finding that blocks the merge is overruled by dropping it: the merge then goes on with green CI and no new pre-merge review.
-      const blocking = premerge.filter((n) => plan.find((x) => x.n === n)?.major);
-      const fix = t("Fix the pre-merge review's findings {parts}, then merge.", { parts: listText(premerge) });
-      const overrule = blocking.length ? ` ${t("To overrule them instead, write drop {parts}: the merge then goes on once CI is green.", { parts: listText(blocking) })}` : "";
-      return { text: `${fix}${overrule}`, parts: { fix: premerge, drop }, merges: true };
-    }
-    return go(t("Review it again, then merge."), { again: "review" });
-  }
   switch (found.blocker) {
     case "author-commits": {
       // The day's review rounds of the author's commits are used up (advance.ts): a yes reviews the new ones too.
@@ -179,25 +167,15 @@ export function atBlocker(found: Found, review: ReviewView | null, plan: readonl
     }
     case "failed-twice": {
       if (p.step === "fix-up") {
-        const fix = planned(plan);
-        return fix.length ? { text: t("Try the fix-up of {parts} again, then merge.", { parts: listText(fix) }), parts: { fix, drop }, merges: true } : go(t("Try the fix-up again, then merge."), { again: "fixup" });
+        // Minor parts are filed as follow-ups on an approved PR, never fixed (ask.ts withoutFixes).
+        const fix = planned(plan).filter((n) => !plan.find((x) => x.n === n)?.minor);
+        const why = typeof p.reason === "string" && p.reason ? `${asSentence(clipText(p.reason, FINDING_CHARS))} ` : "";
+        return fix.length ? { text: `${why}${t("Try the fix-up of {parts} again, then merge.", { parts: listText(fix) })}`, parts: { fix, drop }, merges: true } : go(`${why}${t("Try the fix-up again, then merge.")}`, { again: "fixup" });
       }
       const again = t("Review it again with the failing checks, then merge.");
       return go(p.step === "CI fix" ? `${ciFixFailed(p)} ${again}` : again, { again: "review" });
     }
-    // The fix-up a leg stopped at pushed nothing.
-    case "beyond-agreed": return go(t("Keep the changes to {files}, then merge.", { files: listText((p.files as string[] | undefined) ?? []) }));
-    case "major-finding": {
-      if (review?.rec) return afterSteps(review, plan);
-      const fix = planned(plan).filter((n) => plan.find((x) => x.n === n)?.major);
-      if (fix.length) return { text: fixText(fix, true), parts: { fix, drop }, merges: true };
-      // A review that says hold or close and recommends nothing never said to merge: the question says what it found and offers only what it says.
-      const verdict = review?.verdict ?? p.verdict;
-      if (verdict === "hold" || verdict === "close") return holdOrClose(verdict, review?.finding ?? null, drop);
-      return go(t("Merge it as it is."));
-    }
     case "other": {
-      if (p.limit === "pushes") return go(limitText(p));
       // The review of the author's new commits failed for good: a yes asks for it again.
       if (p.round === "review-failed") return go(t("Review the author's new commits again, then merge."), { newCommits: true, again: "review" });
       return afterStop(String(p.reason ?? ""), go);
@@ -205,35 +183,12 @@ export function atBlocker(found: Found, review: ReviewView | null, plan: readonl
   }
 }
 
-/** What our steps did on the approved PR, as `blockers.ts` limits stop it (`params.limit`), and what a yes lets them do. */
-function limitText(p: Record<string, unknown>): string {
-  const step = PUSH_STEP[p.step as HeldPush]?.() ?? t("the next fix");
-  return t("AutoCraft pushed {count} changes to this pull request since it was approved, and stops before the next one, {step}. Yes lets it go on: {step} runs, and AutoCraft may push up to {limit} more changes before it asks again.", { count: Number(p.count ?? 0), step, limit: PUSHES_PER_APPROVAL });
-}
-
-const PUSH_STEP: Record<HeldPush, () => string> = {
-  fixup: () => t("the fix-up of the review's fixes"),
-  premerge: () => t("the fix-up of the pre-merge review's findings"),
-  cifix: () => t("the CI fix"),
-  conflict: () => t("the merge of its base branch"),
-};
-
 /** What a CI fix that failed twice says: the failing checks (`params.failing`) and its last try (`params.last`), where the blocker names them. */
 function ciFixFailed(p: Record<string, unknown>): string {
   const failing = Array.isArray(p.failing) ? (p.failing as string[]) : [];
   const last = typeof p.last === "string" && p.last ? asSentence(clipText(p.last, FINDING_CHARS)) : null;
   const what = failing.length ? t("CI fails ({checks}), and the CI fix failed twice.", { checks: listText(failing.map((x) => `\`${x}\``)) }) : t("CI fails, and the CI fix failed twice.");
   return last ? `${what} ${t("Its last try: {reason}", { reason: last })}` : what;
-}
-
-/** The question of a review that says hold or close with no recommendation of its own: its finding, then a new review (hold) or the close. */
-function holdOrClose(verdict: "hold" | "close", finding: string | null, drop: number[]): Recommendation {
-  const said = finding ? clipText(finding, FINDING_CHARS) : null;
-  const found = verdict === "hold"
-    ? said ? t("The review says to hold it: {finding}", { finding: asSentence(said) }) : t("The review says to hold it and recommends nothing.")
-    : said ? t("The review says to close it: {finding}", { finding: asSentence(said) }) : t("The review says to close it.");
-  if (verdict === "close") return { text: `${found} ${textFor({ fix: [], merges: false, close: true })}`, parts: { fix: [], drop }, merges: false, close: true };
-  return withFinding({ text: `${found} ${textFor({ fix: [], merges: false, again: "review" })}`, parts: { fix: [], drop }, merges: false, again: "review" }, finding);
 }
 
 const afterStop = (reason: string, go: (text: string) => Recommendation): Recommendation =>

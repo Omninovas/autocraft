@@ -37,7 +37,7 @@ export function pingDue(wf: ItemWorkflow, pinged: readonly (string | null | unde
  * recommended option), the answer is an option's number, or the person's own words when the question has no options.
  */
 export function answerHow(slug: string, wf: Pick<ItemWorkflow, "rec" | "plan">): string {
-  if (!wf.rec?.question || wf.rec.answer) return t("Answer in a comment that starts with `@{slug}`: yes, or another command.", { slug });
+  if (!wf.rec?.question || wf.rec.answer) return t("Answer in a comment that starts with `@{slug}`: go ahead, or say what to do instead.", { slug });
   return wf.plan.some((p) => p.option !== undefined && sameQuestion(p.question, wf.rec!.question))
     ? t("Answer in a comment that starts with `@{slug}`: an option's number, or another command.", { slug })
     : t("Answer in a comment that starts with `@{slug}`: your answer, or another command.", { slug });

@@ -20,7 +20,7 @@ function useMention(): string {
 
 const MAIN = COMMANDS.filter((c) => !c.more);
 const MORE = COMMANDS.filter((c) => c.more);
-const BLOCKERS: Blocker[] = ["major-finding", "author-commits", "failed-twice", "beyond-agreed"];
+const BLOCKERS: Blocker[] = ["failed-twice", "author-commits"];
 const ITEM = "photocraft#803";
 
 /** Phrasings the parser reads, with the command each one runs. */
@@ -275,10 +275,13 @@ function After() {
       </Part>
       <Part title={t("When AutoCraft asks you")}>
         <p>{t("AutoCraft asks one question with one recommendation, in the item's chat, with the findings numbered. It asks whoever started the item and whoever approved its merge; anyone with write access may answer.")}</p>
-        <MessageSample tone="asks">{t("Recommendation: Fix 1 and 2, then merge. Reply yes to fix 1 and 2, then merge (after the pre-merge check and green CI).")}</MessageSample>
+        <MessageSample tone="asks">{t("Recommendation: Fix 1 and 2, then merge. Reply to go ahead: fix 1 and 2, then merge (after the pre-merge check and green CI).")}</MessageSample>
         <ul className="flex list-disc flex-col gap-1 pl-5">
           <li>
-            <Code>yes</Code>, <Code>lgtm</Code>, <Code>go</Code>: {t("runs the recommendation. If it ends in a merge, the yes also approves the merge.")}
+            <Code>yes</Code>, <Code>lgtm</Code>, <Code>proceed</Code>, <Code>go ahead</Code>: {t("runs the recommendation. If it ends in a merge, the answer also approves the merge.")}
+          </li>
+          <li>
+            <Code>merge</Code>: {t("runs the recommendation, whatever it fixes first, then merges.")}
           </li>
           <li>
             {t("Or say what you want instead:")} <Code>fix 1, drop 2, then merge</Code>, <Code>fix the export normals, then merge</Code>, <Code>review</Code>, <Code>close</Code>, <Code>hold</Code>.
@@ -296,11 +299,12 @@ function After() {
       <Part title={t("Merge approval")}>
         <ul className="flex list-disc flex-col gap-1 pl-5">
           <li>
-            <Code>merge</Code> {t("approves, alone or with a start command. So does a yes to a recommendation that ends in a merge.")}
+            <Code>merge</Code> {t("approves, alone or with a start command, as the merge button on GitHub would. So does a yes to a recommendation that ends in a merge.")}
           </li>
           <li>{t("An approved item merges when its steps are done, the pre-merge check is clean and CI is green, in the approver's name.")}</li>
+          <li>{t("AutoCraft makes every fix the merge needs: what the review finds, a hold or close of the review, the pre-merge check's defects, a failed verification, red CI and conflicts. Findings that don't block the merge go to a follow-up issue.")}</li>
           <li>{t("The approval stays through AutoCraft's own fixes and through a hold. It ends with backlog or close, and when the approver loses write access.")}</li>
-          <li>{t("An approved item still comes back at a blocker:")}</li>
+          <li>{t("An approved item comes back only where AutoCraft cannot get to the merge:")}</li>
         </ul>
         <ol className="list-decimal pl-6 text-sm">
           {BLOCKERS.map((b) => (

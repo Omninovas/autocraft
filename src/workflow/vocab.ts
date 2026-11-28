@@ -54,7 +54,7 @@ export const COMMANDS: readonly CommandDef[] = [
   {
     word: "merge", usage: "merge", aliases: ["merge queue", "merge-queue", "mergequeue", "land", "ship"], entry: "merge",
     short: tk("Approve for merge; on a pull request nobody started, the merge queue."),
-    does: tk("Approves the merge. On a started item the steps stay the same and end in a merge. A pull request nobody started goes straight to the merge queue, with no review."),
+    does: tk("Approves the merge, as the merge button on GitHub would: AutoCraft makes every fix the merge needs first. On a started item the steps stay the same and end in a merge; on an open recommendation, it runs the recommendation, then merges. A pull request nobody started goes straight to the merge queue, with no review."),
     back: tk("Only at a blocker."),
     example: "merge",
   },
@@ -94,9 +94,9 @@ export const COMMANDS: readonly CommandDef[] = [
     example: "hold",
   },
   {
-    word: "resume", usage: "resume", aliases: ["continue", "carry on", "unpause"], entry: null,
+    word: "resume", usage: "resume", aliases: ["carry on", "unpause"], entry: null,
     short: tk("Go on with a held item."),
-    does: tk("Goes on with a held item where it was, with its merge approval, now in your name. yes does the same. If the author pushed commits meanwhile, AutoCraft reviews them first. An item nobody started goes back to how it was."),
+    does: tk("Goes on with a held item where it was, with its merge approval, now in your name. yes and continue do the same. If the author pushed commits meanwhile, AutoCraft reviews them first. An item nobody started goes back to how it was."),
     back: tk("As the plan said before the hold."),
     example: "resume",
   },
@@ -131,7 +131,7 @@ export const HOLD_WORDS: readonly string[] = COMMANDS.filter((c) => c.word === "
 
 /** Answers that run the open recommendation as it stands, lower case and without punctuation. */
 export const YES_WORDS: readonly string[] = [
-  "yes", "y", "yep", "yeah", "yup", "ok", "okay", "approve", "approved", "lgtm", "looks good", "looks good to me", "looks great", "go", "go ahead", "go for it", "sounds good", "do it", "ship it",
+  "yes", "y", "yep", "yeah", "yup", "ok", "okay", "approve", "approved", "lgtm", "looks good", "looks good to me", "looks great", "go", "go ahead", "go for it", "sounds good", "do it", "ship it", "proceed", "continue",
 ];
 /** Words a yes may carry after it without changing it: "yes please", "lgtm, thanks". */
 export const YES_TRAILERS: readonly string[] = ["please", "thanks", "thank you", "thx"];

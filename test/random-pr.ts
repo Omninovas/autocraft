@@ -141,7 +141,7 @@ export function randomPrRows(x: Rnd): PrRows {
     const approvedBy = entry === "merge" || ((state !== "recommending" || kind === "issue") && x.bool(0.6)) ? "mira" : null;
     workflow = {
       id: 7, kind, entry, state, approvedBy, baseHead: kind === "issue" && x.bool(0.5) ? null : baseOf(),
-      blocker: state === "blocked" ? (approvedBy ? x.pick(["major-finding", "author-commits", "failed-twice", "other"] as const) : "failed-twice") : null,
+      blocker: state === "blocked" ? (approvedBy ? x.pick(["author-commits", "failed-twice", "other"] as const) : "failed-twice") : null,
     };
   }
   const ended = workflow ? null : x.pick([null, null, null, "stopped", "backlog", "closed", "done"] as const);

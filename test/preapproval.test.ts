@@ -32,7 +32,7 @@ afterEach(async () => {
   // An older image reads the text: it stands for the same blocker as the code.
   for (const l of current ? await current.rows("SELECT reason, reason_code FROM preapprovals WHERE reason IS NOT NULL") : []) {
     assert.ok(l.reason_code, String(l.reason));
-    assert.equal(legBlocker(l.reason_code as StopCode), legBlocker(stopCodeOf(String(l.reason))), String(l.reason));
+    assert.deepEqual(legBlocker({ reason: "x", code: l.reason_code as StopCode }).blocker, legBlocker({ reason: "x", code: stopCodeOf(String(l.reason)) }).blocker, String(l.reason));
   }
   current?.close();
 });
@@ -290,7 +290,7 @@ describe("pre-approved merge", () => {
     assert.deepEqual([p.state, p.head], ["review", "sha50c"]);
   });
 
-  test("a queued PR leaves the queue for the question of a failed verification, and not for a transient refusal, a batch or a running merge", async () => {
+  test("a queued PR with a failed verification gets a fix-up and merges nothing before it; a transient refusal, a batch or a running merge change nothing", async () => {
     const w = await (await take(await fresh(), 51)).review(51, { verdict: "take-fix" });
     await inCi(w, 51);
     await (await w.premerge(51, "clean")).verified(51);
@@ -308,9 +308,11 @@ describe("pre-approved merge", () => {
     const job = (await w.db.get(w.db.k.insertInto("jobs").values({ step: "merge", params: "{}", requested_by: "pipeline", requested_at: T0, state: "running", repo: "app" }).returning("id")))!;
     assert.equal(await state(), "queued", "a merge of the repo runs");
     await w.db.run(w.db.k.updateTable("jobs").set({ state: "done" }).where("id", "=", job.id));
-    assert.equal(await state(), "cancelled");
+    assert.equal(await state(), "queued", "the leg waits in the queue for the fix-up's push, which takes it back to review");
+    assert.ok(!(await kindsOf(w, 51)).some((k) => k.startsWith("merge")), "nothing merges past the failed verification");
     const wf = (await liveWorkflow(w.db, "app", 51))!;
-    assert.deepEqual([wf.state, wf.blocker, wf.blockerParams?.code, wf.rec?.merges], ["blocked", "major-finding", "verification-failed", true]);
+    assert.deepEqual([wf.state, wf.rec], ["running", null], "no question");
+    assert.ok((await w.rows("SELECT from_head FROM operator_fixups WHERE number = 51")).some((r) => r.from_head === "sha51b"), "a fix-up of the verified head is asked for");
   });
 
   test("a leg on a draft waits where it is until the PR is ready for review", async () => {

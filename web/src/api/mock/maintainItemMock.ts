@@ -64,7 +64,7 @@ const SEEDS: Record<string, Seed> = {
       lines: [`Merge queue, started by ochre-fox, ${hhmm(ago(60))}`, `Approved for merge by ochre-fox, ${hhmm(ago(60))}`],
       steps: [{ label: "update from main", state: "done" }, { label: "fix CI and conflicts", state: "done" }, { label: "batch", state: "stopped" }, { label: "merge", state: "next" }],
       parts: [],
-      asked: ago(30), to: ["ochre-fox"], rec: "Go on with the merge after this stop: the merge was refused: the branch protection of main asks for a second approving review, and the only reviewer with write access… Reply yes to merge it (after the pre-merge check and green CI).",
+      asked: ago(30), to: ["ochre-fox"], rec: "Go on with the merge after this stop: the merge was refused: the branch protection of main asks for a second approving review, and the only reviewer with write access… Reply to go ahead and merge it (after the pre-merge check and green CI).",
       unclear: null,
       confirm: `Updating from main, then merging in the next batch when CI is green (started by ochre-fox, ${hhmm(ago(60))}). Reply hold to halt.`,
       notPosted: null,

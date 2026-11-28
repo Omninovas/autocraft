@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { needsQuestion, stopCodeOf, type WaitCode } from "../src/core/codes.ts";
 import { decideItem } from "../src/core/decide-item.ts";
 import { decidePr } from "../src/core/decide.ts";
-import { legBlocker, premergeStop } from "../src/workflow/blockers.ts";
+import { fixesFirst, legBlocker, premergeStop, type EndedLeg } from "../src/workflow/blockers.ts";
 import { factsOf, prng, randomPrRows, rnd, type PrRows, type Rnd } from "./random-pr.ts";
 import { randomItem } from "./random-item.ts";
 
@@ -48,16 +48,18 @@ const REASONS = (H: string): string[] => [
   `verification failed at ${H}`, "the merge was refused: a required review", "the merge was refused: verification failed", "cancelled by pipeline", "cancelled by mira", "cancelled", "failed", "asked",
 ];
 
-test("a merge leg's reason stands for the same blocker by its code as by its text", () => {
+test("a merge leg's reason stands for the same blocker, or the same fix first, by its code as by its text", () => {
   // What a person sees a leg stop for, told from the text alone.
   const byText = (reason: string): string =>
     /another push moved the head|the head went back/.test(reason) ? "author-commits"
-    : /the review says (hold|close)|verification failed|pre-merge review found/.test(reason) ? "major-finding"
+    : /the review says (hold|close)|verification failed|pre-merge review found/.test(reason) ? "fixed first"
+    : /too-large|^the fix-up |fix-up cannot run/.test(reason) ? "failed-twice"
     : "other";
+  const outcome = (leg: EndedLeg): string => (fixesFirst(leg) ? "fixed first" : legBlocker(leg).blocker);
   const given = new Set(["cancelled", "failed", "asked"]);
   for (const reason of ["the pushed head", "the new head", "the PR's head"].flatMap(REASONS)) {
     const code = stopCodeOf(reason);
-    assert.equal(legBlocker(code), byText(reason), `${reason}: ${code}`);
+    assert.equal(outcome({ reason: "x", code }), byText(reason), `${reason}: ${code}`);
     assert.equal(code === "other", given.has(reason), `${reason}: ${code}`);
     // Of two reasons in one text the first blocker wins; a pre-merge defect is told from its own sentence.
     if (/^the pre-merge review found/.test(reason)) assert.ok(code === "premerge-defect" && premergeStop({ reason }) && premergeStop({ reason: "x", code }));
